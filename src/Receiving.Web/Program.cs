@@ -56,7 +56,16 @@ if (db.Query("SELECT 1 FROM admins", r => 1).Count == 0)
     db.Exec("INSERT INTO admins(account,name,added_by,added_at) VALUES($0,$1,$2,$3)", @"BG\sims.anderson", "Sims Anderson", "system", Now());
 
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    // app pages and scripts: always ask the server if they changed (cheap, uses the ETag) so an update shows up on the next load.
+    // libraries and icons never change under the same name, so those can be cached for a day.
+    OnPrepareResponse = ctx =>
+    {
+        var p = ctx.Context.Request.Path.Value ?? "";
+        ctx.Context.Response.Headers["Cache-Control"] = p.StartsWith("/vendor/") || p.StartsWith("/icons/") || p.StartsWith("/tolerances/") ? "public, max-age=86400" : "no-cache";
+    }
+});
 app.Use(async (c, next) =>
 {
     if (c.Request.Path.StartsWithSegments("/api") && !HttpMethods.IsGet(c.Request.Method) && !HttpMethods.IsHead(c.Request.Method)
