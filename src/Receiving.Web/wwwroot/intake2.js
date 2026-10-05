@@ -208,7 +208,7 @@ async function readPageText(n){
     if(sc>score){score=sc;best=text}
     if(sc>=40)break;                   // reads as upright text, no need to try the other turns
   }
-  return best;
+  return {text:best,score};
 }
 const normH=t=>String(t).toUpperCase().replace(/[^A-Z0-9]/g,'');
 function findHeat(h,pages){
@@ -226,9 +226,10 @@ async function checkHeats(){
     for(let n=1;n<=pdf.numPages;n++){
       if(n===skip)continue;
       box.innerHTML=`<div class="sug busy">Reading page ${n} of ${pdf.numPages} for heat numbers. A packet takes a few minutes.</div>`;
-      pages.push({n,text:await readPageText(n)});
+      {const r=await readPageText(n);pages.push({n,text:r.text,ok:r.score>=30})}
     }
-    HEATRES='<div class="sgc" style="margin-top:8px">'+heats.map(h=>{const r=findHeat(h,pages);return r?`<span class="chip ${r.exact?'on':'pend'}">Heat ${esc(h)} ${r.exact?'found':'close match'} on page ${r.page}</span>`:`<span class="chip bad">Heat ${esc(h)} not found on any page. Check for a typo.</span>`}).join('')+'</div>';
+    const unread=pages.filter(p=>!p.ok).map(p=>p.n);
+    HEATRES='<div class="sgc" style="margin-top:8px">'+heats.map(h=>{const r=findHeat(h,pages);return r?`<span class="chip ${r.exact?'on':'pend'}">Heat ${esc(h)} ${r.exact?'found':'close match'} on page ${r.page}</span>`:unread.length?`<span class="chip pend">Heat ${esc(h)} not found. Page${unread.length===1?'':'s'} ${unread.join(', ')} could not be read well, so check it by eye.</span>`:`<span class="chip bad">Heat ${esc(h)} not found on any page. Check for a typo.</span>`}).join('')+'</div>'+(unread.length?`<div class="muted" style="margin-top:6px;font-size:12px">Pages that could not be read clearly: ${unread.join(', ')}. Poor scans and sideways pages are the usual cause.</div>`:'');
     box.innerHTML=HEATRES;
   }catch(e){box.innerHTML='<div class="sug err">Could not check heats: '+esc(e.message)+'</div>'}
 }
