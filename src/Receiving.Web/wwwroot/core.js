@@ -121,6 +121,20 @@ function tabsFor(){
   if(has('admin'))t.push(['settings','gear','Settings']);
   return t;
 }
+/* ---- tabs: main ones on the left, My inbox on the right as a highlighted pill with a count ---- */
+let curTab='';
+function badgeCount(k){
+  if(k==='inbox')return S.packets.filter(p=>p.stage==='new'||p.stage==='inspecting').length;
+  if(k==='reviews')return S.packets.filter(p=>p.stage==='review'&&(p.requiredReviewers||[]).some(r=>r.id===S.me.id)&&!(p.approvals||[]).some(a=>a.id===S.me.id)).length;
+  return 0;
+}
+function renderTabs(){
+  if(!S.me)return;
+  const html=([k,i,l])=>{const n=badgeCount(k);return `<a href="#/${k}" class="${k==='inbox'?'inbox ':''}${curTab===k?'on':''}">${ic(i)} ${l}${n?`<span class="pill-n" title="${n} waiting">${n}</span>`:''}</a>`};
+  const all=tabsFor();
+  $('#tabs').innerHTML=all.filter(t=>t[0]!=='inbox').map(html).join('');
+  $('#tabs2').innerHTML=all.filter(t=>t[0]==='inbox').map(html).join('');
+}
 function nav(h){location.hash=h}
 addEventListener('hashchange',()=>{if(S.me)route()});
 let routeSeq=0;
@@ -132,13 +146,14 @@ async function route(){
   $('#app').classList.remove('wide');
   const v=parts[0],tabs=tabsFor();
   const cur=v==='p'?(has('coordinator')?'board':has('receiver')?'inbox':'reviews'):v;
-  $('#tabs').innerHTML=tabs.map(([k,i,l])=>`<a href="#/${k}" class="${cur===k?'on':''}">${ic(i)} ${l}</a>`).join('');
+  curTab=cur;renderTabs();
   closeDrawer();
   try{
     if(v==='settings'&&has('admin'))return viewSettings();
     if(v==='new'&&has('coordinator'))return viewNew();
     if(v==='dashboard'&&has('coordinator'))return viewDashboard();
     await loadPackets();if(seq!==routeSeq)return;
+    renderTabs();
     if(v==='p'&&parts[2]==='f')return viewForm(parts[1],parts[3],parts[4]);
     if(v==='p')return viewPacket(parts[1]);
     if(v==='board'&&has('coordinator'))return viewBoard();
@@ -147,6 +162,11 @@ async function route(){
     nav(firstRoute());
   }catch(e){if(e.message!=='Signed out')$('#app').innerHTML=`<div class="card empty err">${esc(e.message)}</div>`}
 }
+/* keep the counts on the tabs fresh even when another page is open */
+setInterval(async()=>{
+  if(!S.me||document.hidden||!(has('receiver')||has('reviewer')))return;
+  try{S.packets=await api('GET','/api/packets');renderTabs()}catch(e){}
+},30000);
 /* refresh list views so new packets show up on tablets */
 setInterval(()=>{
   if(!S.me||document.hidden||$('#drawer').classList.contains('open')||document.querySelector('.pinwrap,.modal'))return;

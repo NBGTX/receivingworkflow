@@ -387,3 +387,13 @@ input.warnfld{border-color:#e3b25a !important;background:var(--amberbg) !importa
 .hb{height:12px;background:var(--pg);border-radius:99px;overflow:hidden}.hb i{display:block;height:100%;background:var(--mg);border-radius:99px}
 .hl{font-weight:bold;color:var(--dg);font-size:13px}.hv{text-align:right;font-weight:bold}.hn{font-size:11px}
 .frm12 .c12{grid-column:span 12}.frm12 .c9{grid-column:span 9}.frm12 .c8{grid-column:span 8}.frm12 .c7{grid-column:span 7}
+
+/* tab count pills; My inbox is a highlighted pill on the right */
+.pill-n{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:99px;font-size:12px;font-weight:bold;background:var(--lg);color:var(--dg);margin-left:2px}
+.tabs2{margin-right:12px}
+.tabs2 a.inbox{align-self:center;height:42px;border-radius:99px;border-bottom:0;background:var(--lg);color:var(--dg);padding:0 16px 0 18px}
+.tabs2 a.inbox:hover{background:#b9dcc4;color:var(--dg)}
+.tabs2 a.inbox.on{background:#fff;color:var(--dg)}
+.tabs2 a.inbox .pill-n{background:var(--dg);color:#fff}
+.tabs a{white-space:nowrap}
+@media(max-width:1500px){.tabs a{padding:0 12px;gap:6px}.tabs2 a.inbox{padding:0 12px 0 14px}}
