@@ -3,7 +3,7 @@ const COLS=[['po','PO #'],['heat','Heat #'],['coil','Coil / bundle #'],['cc','CC
 const Q=2;
 async function fitPage(){
   const pg=await pdf.getPage(pageNo),r=((pg.rotate||0)+(rot[pageNo]||0))%360,v=pg.getViewport({scale:1,rotation:r});
-  const st=$('#stage'),availH=Math.max(480,innerHeight-(innerWidth>=1500?215:250));
+  const st=$('#stage'),availH=Math.max(480,innerHeight-215);
   const availW=innerWidth>=1500?$('.ix').clientWidth*.62-60:st.clientWidth-24;
   scale=Math.max(.5,Math.min(4,availW/v.width,(availH-12)/v.height));
 }
@@ -80,7 +80,7 @@ function clean(f,t){if(f==='po')return t.replace(/\s+/g,'').replace(/^T[XK]?[-_ 
 function put(el,t){el.value=clean(el.dataset.f,t);if($('#auto').checked){const o=$$('[data-f]'),i=o.indexOf(el);if(i<o.length-1)setActive(o[i+1])}}
 function fillDown(lines){const f=active.dataset.f;let tr=active.closest('tr');lines.forEach(t=>{if(!tr)tr=addRow();tr.querySelector(`[data-f=${f}]`).value=clean(f,t);tr=tr.nextElementSibling})}
 function ocrs(t,k){const o=$('#ocr');if(!o)return;o.textContent=t;o.className=k===1?'busy':k===2?'err':''}
-function addRow(v={}){const tr=document.createElement('tr');tr.innerHTML=COLS.map(c=>`<td><input data-f="${c[0]}" value="${esc(v[c[0]]||'')}"></td>`).join('')+'<td><button class="btn sm ghost" tabindex="-1" title="Remove row">&times;</button></td>';
+function addRow(v={}){const tr=document.createElement('tr');tr.innerHTML=COLS.map(c=>`<td><input data-f="${c[0]}" placeholder="${c[1]}" aria-label="${c[1]}" value="${esc(v[c[0]]||'')}"></td>`).join('')+'<td><button class="btn sm ghost" tabindex="-1" title="Remove row">&times;</button></td>';
   tr.querySelector('button').onclick=()=>tr.remove();tr.querySelectorAll('input').forEach(i=>i.addEventListener('focus',()=>setActive(i)));$('#rows').appendChild(tr);return tr}
 function setActive(el){if(active)active.classList.remove('active');active=el;if(el){el.classList.add('active');el.focus({preventScroll:true})}}
 async function saveNew(){

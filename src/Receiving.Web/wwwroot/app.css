@@ -321,3 +321,34 @@ table.cells th{font-size:10px;letter-spacing:.2px}
 
 .btn.danger{border-color:var(--red);color:var(--red);background:#fff}
 .btn.danger:hover{background:var(--redbg)}
+
+/* New packet: PDF and index always side by side, at any width */
+main#app.wide{max-width:none;padding:10px 12px}
+main#app.wide .pagehead{display:none}
+.ix>.card>h2{display:none}
+.ix{grid-template-columns:minmax(0,1fr) minmax(0,1.15fr) !important;gap:12px}
+.ix>.card{padding:12px}
+#stage{width:auto;max-width:100%;max-height:calc(100vh - 215px);min-height:360px}
+.ix>.card:last-child{position:sticky;top:74px}
+@media(min-width:1500px){
+  .ix{grid-template-columns:fit-content(62%) minmax(0,1fr) !important}
+  #stage{width:fit-content}
+}
+/* narrower screens: each index row becomes a two-line card so every value stays readable without sideways scrolling */
+@media(max-width:1499px){
+  table.cells thead,table.cells colgroup{display:none}
+  table.cells,table.cells tbody{display:block;width:100%}
+  table.cells tr{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:6px;padding:8px 0;border-bottom:1px solid var(--line)}
+  table.cells td{display:block;padding:0;min-width:0}
+  table.cells td:nth-child(1){grid-column:span 3;order:1}
+  table.cells td:nth-child(2){grid-column:span 3;order:2}
+  table.cells td:nth-child(3){grid-column:span 3;order:3}
+  table.cells td:nth-child(4){grid-column:span 2;order:4}
+  table.cells td:nth-child(8){grid-column:span 1;order:5}
+  table.cells td:nth-child(5){grid-column:span 6;order:6}
+  table.cells td:nth-child(6){grid-column:span 3;order:7}
+  table.cells td:nth-child(7){grid-column:span 3;order:8}
+  table.cells td:nth-child(8) .btn{min-height:38px;width:100%;padding:0}
+  .ix .fh{grid-template-columns:1fr 1fr}
+  .vtool select{max-width:100%}
+}
