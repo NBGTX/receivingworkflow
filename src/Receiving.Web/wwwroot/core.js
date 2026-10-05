@@ -115,8 +115,9 @@ function renderShell(){
 function tabsFor(){
   const t=[];
   // intake first (overview, list, create), then the people who act on a packet, settings last
-  if(has('coordinator')){t.push(['dashboard','chart','Dashboard']);t.push(['board','list','Packets']);t.push(['new','plus','New packet'])}
-  if(has('reviewer'))t.push(['reviews','stamp','Reviews']);
+  if(has('coordinator','reviewer')){t.push(['dashboard','chart','Dashboard']);t.push(['board','list','Packets'])}
+  if(has('coordinator'))t.push(['new','plus','New packet']);
+  if(has('reviewer','coordinator'))t.push(['reviews','stamp','Reviews']);
   if(has('receiver'))t.push(['inbox','inbox','My inbox']);
   if(has('admin'))t.push(['settings','gear','Settings']);
   return t;
@@ -145,19 +146,20 @@ async function route(){
   const parts=(location.hash||'').replace(/^#\/?/,'').split('/').map(decodeURIComponent);
   $('#app').classList.remove('wide');
   const v=parts[0],tabs=tabsFor();
-  const cur=v==='p'?(has('coordinator')?'board':has('receiver')?'inbox':'reviews'):v;
+  if(['board','reviews','inbox','dashboard'].includes(v))S.lastList='/'+v;
+  const cur=v==='p'?((S.lastList||'').slice(1)||(has('coordinator','reviewer')?'board':'inbox')):v;
   curTab=cur;renderTabs();
   closeDrawer();
   try{
     if(v==='settings'&&has('admin'))return viewSettings();
     if(v==='new'&&has('coordinator'))return viewNew();
-    if(v==='dashboard'&&has('coordinator'))return viewDashboard();
+    if(v==='dashboard'&&has('coordinator','reviewer'))return viewDashboard();
     await loadPackets();if(seq!==routeSeq)return;
     renderTabs();
     if(v==='p'&&parts[2]==='f')return viewForm(parts[1],parts[3],parts[4]);
     if(v==='p')return viewPacket(parts[1]);
-    if(v==='board'&&has('coordinator'))return viewBoard();
-    if(v==='reviews'&&has('reviewer'))return viewReviews();
+    if(v==='board'&&has('coordinator','reviewer'))return viewBoard();
+    if(v==='reviews'&&has('reviewer','coordinator'))return viewReviews();
     if(v==='inbox'&&has('receiver'))return viewInbox();
     nav(firstRoute());
   }catch(e){if(e.message!=='Signed out')$('#app').innerHTML=`<div class="card empty err">${esc(e.message)}</div>`}

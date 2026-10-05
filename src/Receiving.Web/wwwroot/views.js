@@ -40,7 +40,7 @@ function viewBoard(){
   const cnt=k=>S.packets.filter(p=>p.stage===k).length;
   const rows=S.packets.filter(p=>(boardF==='all'||p.stage===boardF)&&(!boardQ||(p.bol+p.vendor+pos(p).join(' ')+p.rows.map(r=>r.heat+r.cc).join(' ')).toLowerCase().includes(boardQ.toLowerCase())));
   $('#app').innerHTML=`
-  <div class="pagehead"><div class="grow"><h1>Packets</h1><p>Every steel packet and where it stands.</p></div><a class="btn pri" href="#/new">${ic('plus')} New packet</a></div>
+  <div class="pagehead"><div class="grow"><h1>Packets</h1><p>Every steel packet and where it stands.</p></div>${has('coordinator')?`<a class="btn pri" href="#/new">${ic('plus')} New packet</a>`:''}</div>
   <div class="stats">${STAGES.map(([k,l])=>`<button class="stat ${boardF===k?'on':''}" data-s="${k}"><div class="n">${cnt(k)}</div><div class="l">${l}</div></button>`).join('')}</div>
   <div class="toolbar"><div class="search">${ic('search')}<input id="q" placeholder="Search BOL, PO, vendor, heat, CC #" value="${esc(boardQ)}"></div><button class="pill ${boardF==='all'?'on':''}" data-s="all">All <i>${S.packets.length}</i></button></div>
   <table class="list"><thead><tr><th>BOL #</th><th>Vendor</th><th>POs</th><th>Items</th><th>Inspections</th><th>Status</th><th>In stage</th></tr></thead><tbody>
@@ -59,7 +59,8 @@ function viewPacket(id){
   const p=P(id);if(!p){$('#app').innerHTML='<div class="card empty">Packet not found.</div>';return}
   const canInspect=has('receiver','coordinator'),editable=p.stage==='new'||p.stage==='inspecting';
   const si=STAGES.findIndex(s=>s[0]===p.stage),allCov=covered(p)===pos(p).length;
-  const back=has('coordinator')?['/board','All packets']:has('receiver')?['/inbox','My inbox']:['/reviews','Reviews'];
+  const names={'/board':'All packets','/reviews':'Reviews','/inbox':'My inbox','/dashboard':'Dashboard'};
+  const back=S.lastList&&names[S.lastList]?[S.lastList,names[S.lastList]]:(has('coordinator','reviewer')?['/board','All packets']:['/inbox','My inbox']);
   $('#app').innerHTML=`
   <button class="crumb" id="back">${ic('back')} ${back[1]}</button>
   <div class="pagehead"><div class="grow"><h1>BOL ${esc(p.bol)}</h1><p>${esc(p.vendor)} &middot; ${esc(p.carrier||'')} &middot; shipped ${esc(p.ship||'')}</p></div>

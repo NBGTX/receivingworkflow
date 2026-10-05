@@ -149,7 +149,7 @@ internal static class Features
         var rep = api.MapGroup("/reports").RequireAuthorization();
         rep.MapGet("/summary", (ClaimsPrincipal u) =>
         {
-            if (x.GetMe(u) is not { } me || !me.Has("coordinator")) return Results.Forbid();
+            if (x.GetMe(u) is not { } me || !me.Has("coordinator", "reviewer")) return Results.Forbid();
             var now = Now(); var list = All().Where(p => !IsDraft(p.d)).ToList();
             long? Find(JsonObject d, params string[] prefixes)
             {
@@ -205,7 +205,7 @@ internal static class Features
 
         rep.MapGet("/export.csv", (ClaimsPrincipal u, string? from, string? to, string? vendor, string? stage) =>
         {
-            if (x.GetMe(u) is not { } me || !me.Has("coordinator")) return Results.Forbid();
+            if (x.GetMe(u) is not { } me || !me.Has("coordinator", "reviewer")) return Results.Forbid();
             DateTime? f = DateTime.TryParse(from, out var a) ? a : null, t = DateTime.TryParse(to, out var b) ? b.AddDays(1) : null;
             string Q(string? s) => "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
             var keys = new[] { "qty", "len", "width", "thick", "depth", "id", "od", "gauge", "color", "wall", "sweep", "visual", "surface", "cert" };

@@ -87,6 +87,8 @@ try {
   Check 'backup runs and lists' { $b = Call $adm POST '/api/admin/backups/run' @{}; $b.file -and @((Call $adm GET '/api/admin/backups').files).Count -ge 1 }
   Check 'status page answers' { (Call $adm GET '/api/admin/status').users -ge 3 }
   Check 'audit search answers' { @((Call $adm GET '/api/admin/audit?q=smoke').rows).Count -ge 1 }
+  Check 'reviewer can read the dashboard data' { (Call $rv GET '/api/reports/summary').total -ge 1 }
+  Check 'receiver cannot read the dashboard data' { (Status (Call $r1 GET '/api/reports/summary')) -eq 403 }
   Check 'receiver cannot open admin settings' { (Status (Call $r1 GET '/api/admin/settings')) -eq 403 }
 }
 finally {
