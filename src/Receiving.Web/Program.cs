@@ -98,17 +98,40 @@ api.MapPost("/auth/pin", async (HttpContext c, PinReq req) =>
 api.MapGet("/auth/windows", async (HttpContext c) =>
 {
     var winScheme = underIis ? "Windows" : NegotiateDefaults.AuthenticationScheme;
+    // ?next=1 means the browser navigated here (top level), which is the only reliable way to let it do the Windows handshake.
+    // Without it the reply is JSON, for scripts and tests.
+    var nav = c.Request.Query.ContainsKey("next");
+    async Task Page(int status, string title, string text)
+    {
+        c.Response.StatusCode = status; c.Response.ContentType = "text/html; charset=utf-8";
+        await c.Response.WriteAsync($"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>{title}</title><body style=\"margin:0;min-height:100vh;display:grid;place-items:center;background:#F5F4F0;font:16px Arial,sans-serif;color:#1b2a26;text-align:center;padding:24px\"><div><h1 style=\"color:#213B34\">{title}</h1><p style=\"color:#5d6b66\">{text}</p><p><a href=\"/\" style=\"display:inline-block;background:#006325;color:#fff;padding:14px 26px;border-radius:8px;text-decoration:none;font-weight:bold\">Back to Steel Receiving</a></p></div></body>");
+    }
     AuthenticateResult r;
     try { r = await c.AuthenticateAsync(winScheme); }
-    catch (Exception ex) { c.Response.StatusCode = 500; await c.Response.WriteAsJsonAsync(new { error = "Windows sign-in is not available here (" + winScheme + "): " + ex.Message }); return; }
-    if (!r.Succeeded || r.Principal?.Identity?.Name is not { } acct) { await c.ChallengeAsync(winScheme); return; }
+    catch (Exception ex)
+    {
+        if (nav) { await Page(500, "Windows sign-in is not available", System.Net.WebUtility.HtmlEncode(ex.Message)); return; }
+        c.Response.StatusCode = 500; await c.Response.WriteAsJsonAsync(new { error = "Windows sign-in is not available here (" + winScheme + "): " + ex.Message }); return;
+    }
+    if (!r.Succeeded || r.Principal?.Identity?.Name is not { } acct)
+    {
+        await c.ChallengeAsync(winScheme);
+        if (nav) await Page(401, "Windows sign-in needed", "Your browser did not send Windows credentials. Try again and enter your Windows user name and password if asked.");
+        return;
+    }
     var local = acct.Contains('\\') ? acct[(acct.IndexOf('\\') + 1)..] : acct;
     var row = db.One("SELECT account,name FROM admins WHERE account=$0 OR account=$1 OR (instr(account,'\\')=0 AND account=$1)",
         x => new { Acct = x.GetString(0), Name = x.GetString(1) }, acct, local);
-    if (row == null) { db.Audit(acct, "windows_denied"); c.Response.StatusCode = 403; await c.Response.WriteAsJsonAsync(new { error = $"{acct} is not an admin." }); return; }
+    if (row == null)
+    {
+        db.Audit(acct, "windows_denied");
+        if (nav) { await Page(403, "Not an admin", System.Net.WebUtility.HtmlEncode(acct) + " is not on the admin list. Ask an admin to add it in Settings."); return; }
+        c.Response.StatusCode = 403; await c.Response.WriteAsJsonAsync(new { error = $"{acct} is not an admin." }); return;
+    }
     var me = new Me("win", acct, string.IsNullOrWhiteSpace(row.Name) ? acct : row.Name, Initials(row.Name, acct), ["admin", "coordinator", "receiver", "reviewer"]);
     await c.SignInAsync(Principal(me));
     db.Audit(acct, "login", "windows");
+    if (nav) { c.Response.Redirect("/#/"); return; }
     await c.Response.WriteAsJsonAsync(MeJson(me));
 });
 

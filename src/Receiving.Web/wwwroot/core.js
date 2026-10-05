@@ -69,11 +69,11 @@ async function showLogin(msg){
     $$('.ucard').forEach(c=>c.onclick=()=>pinPad(+c.dataset.id,c.dataset.n,c.dataset.i));
   }catch(e){$('#ucards').innerHTML='<div class="card empty err" style="grid-column:1/-1">'+esc(e.message)+'</div>'}
 }
-async function winLogin(){
-  const e=$('#winerr');e.textContent='Checking Windows sign-in...';e.className='hint';
-  try{const r=await fetch('/api/auth/windows',{credentials:'same-origin'});const j=await r.json().catch(()=>null);
-    if(!r.ok)throw new Error(j?.error||'Windows sign-in failed ('+r.status+'). Open the site from your work PC on the company network.');
-    S.me=j;await enter()}catch(x){e.textContent=x.message;e.className='hint err'}
+function winLogin(){
+  // Full page navigation: the browser can run the Windows handshake (or ask for a password) properly here,
+  // then the server signs the admin in and sends them back to the app.
+  const e=$('#winerr');e.textContent='Opening Windows sign-in...';e.className='hint';
+  location.href='/api/auth/windows?next=1';
 }
 function pinPad(id,name,ini){
   let v='';const L=S.cfg.pinLength;
