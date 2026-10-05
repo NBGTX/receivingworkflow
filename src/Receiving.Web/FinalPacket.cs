@@ -78,6 +78,17 @@ public static class FinalPacket
         public void Close() { G?.Dispose(); }
     }
 
+    public static byte[] Merge(IEnumerable<Stream> files)
+    {
+        var doc = new PdfDocument();
+        foreach (var f in files)
+        {
+            using var src = PdfReader.Open(f, PdfDocumentOpenMode.Import);
+            foreach (var pg in src.Pages) doc.AddPage(pg);
+        }
+        using var ms = new MemoryStream(); doc.Save(ms, false); return ms.ToArray();
+    }
+
     public static byte[] Build(string bol, string stage, JsonObject d, string? originalPdf, string siteName, string? photosDir = null)
     {
         var doc = new PdfDocument();

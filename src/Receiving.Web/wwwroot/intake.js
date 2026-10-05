@@ -12,10 +12,10 @@ function viewNew(){
   $('#app').classList.add('wide');
   pdf=null;boxes={};rot={};pageNo=1;active=null;curBuf=null;picks={};
   $('#app').innerHTML=`
-  <div class="pagehead"><div class="grow"><h1>New packet</h1><p>Open the merged packet PDF, then click a field and drag a box around the text to fill it.</p></div></div>
+  <div class="pagehead"><div class="grow"><h1>New packet</h1><p>Open the packet PDF, or pick several files at once to join them. Then click a field and drag a box around the text to fill it.</p></div></div>
   <div class="ix">
    <div class="card"><h2>Packet PDF</h2>
-    <div class="vtool"><input type="file" id="file" accept="application/pdf" style="font-size:13px"></div>
+    <div class="vtool"><input type="file" id="file" accept="application/pdf" multiple style="font-size:13px" title="Pick several files to merge them in the order shown"></div>
     <div class="vtool"><button class="btn sm" id="prev">&lsaquo;</button><span class="num" id="pg">0 / 0</span><button class="btn sm" id="next">&rsaquo;</button>
      <button class="btn sm" id="rotL">${ic('rot')} Rotate</button><button class="btn sm" id="zo">&minus;</button><span class="num" id="zl">100%</span><button class="btn sm" id="zi">+</button><button class="btn sm" id="zfit">Fit page</button></div>
     <div id="stage"><div id="wrap"><canvas id="cv" width="10" height="10"></canvas><div id="ov"></div></div></div></div>
@@ -30,7 +30,18 @@ function viewNew(){
     <p class="muted" id="msg" style="margin:6px 0 0;font-size:13px"></p></div>
   </div>`;
   const ov=$('#ov');
-  $('#file').onchange=e=>{const f=e.target.files[0];if(f)f.arrayBuffer().then(openData)};
+  $('#file').onchange=async e=>{
+    const files=[...e.target.files];if(!files.length)return;
+    if(files.length===1)return files[0].arrayBuffer().then(openData);
+    ocrs('Joining '+files.length+' PDFs in the order picked...',1);
+    try{
+      const fd=new FormData();files.forEach(f=>fd.append('files',f,f.name));
+      const r=await fetch('/api/pdf/merge',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd,credentials:'same-origin'});
+      if(!r.ok){let m='Could not join the files';try{m=(await r.json()).error||m}catch(x){}throw new Error(m)}
+      await openData(await r.arrayBuffer());
+      ocrs('Joined '+files.length+' files ('+files.map(f=>f.name).join(', ')+'). Pages are in that order.');
+    }catch(x){ocrs(x.message,2)}
+  };
   $('#prev').onclick=()=>{if(pdf&&pageNo>1){pageNo--;rend()}};$('#next').onclick=()=>{if(pdf&&pageNo<pdf.numPages){pageNo++;rend()}};
   $('#rotL').onclick=()=>{rot[pageNo]=((rot[pageNo]||0)+90)%360;delete boxes[pageNo];rend()};
   $('#zfit').onclick=()=>{if(pdf){fitPage().then(()=>{boxes={};rend()})}};

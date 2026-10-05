@@ -297,6 +297,21 @@ internal static class Features
             catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
+        /* ---------------- merge several PDFs into one packet PDF ---------------- */
+        api.MapPost("/pdf/merge", async (HttpRequest req, ClaimsPrincipal u) =>
+        {
+            if (x.GetMe(u) is not { } me || !me.Has("coordinator")) return Results.Forbid();
+            try
+            {
+                var form = await req.ReadFormAsync();
+                if (form.Files.Count == 0) return Results.BadRequest(new { error = "Pick at least one PDF." });
+                var streams = new List<Stream>();
+                foreach (var f in form.Files) { var ms = new MemoryStream(); await f.CopyToAsync(ms); ms.Position = 0; streams.Add(ms); }
+                return Results.File(FinalPacket.Merge(streams), "application/pdf");
+            }
+            catch (Exception ex) { return Results.BadRequest(new { error = "Could not merge those files: " + ex.Message }); }
+        }).RequireAuthorization();
+
         /* ---------------- photos (rejects, damage) ---------------- */
         var pk = api.MapGroup("/packets").RequireAuthorization();
         pk.MapPost("/{id}/photo", async (string id, ClaimsPrincipal u, HttpContext c) =>

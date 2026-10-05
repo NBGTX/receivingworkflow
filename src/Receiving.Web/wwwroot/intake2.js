@@ -19,8 +19,8 @@ function parseBol(text){
   let m=full.match(/(?:bill\s+of\s+lading|b\.?\s?o\.?\s?l\.?)\s*(?:no\.?|number|#)\s*[:.#]?\s*(\d{5,10})/i)||full.match(/bill\s+of\s+lading\s*no\.?[\s\S]{0,140}?\b(\d{6,8})\b/i);if(m)out.bol=m[1];
   m=full.match(/(?:ship(?:ped|ping)?\s*date|date)\s*[:.]?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i)||full.match(/\b(\d{1,2}\/\d{1,2}\/\d{2,4})\b/);if(m)out.ship=m[1];
   m=full.match(/(?:^|\n|\s)from\s*[:.]?\s*([^\n]{4,70})/i);
-  if(m)out.vendor=m[1].replace(/\b(telephone|phone|tel|date|at)\b.*$/i,'').replace(/\s{2,}.*$/,'').trim();
-  m=full.match(/^[ \t]*carrier[ \t]*[:.]?[ \t]*([A-Za-z0-9][^\n]{2,140})$/im);if(m)out.carrier=m[1].replace(/\b(bol|vehicle|trailer|load|car or)\b.*$/i,'').trim();
+  if(m)out.vendor=m[1].replace(/\b(telephone|phone|tel|date|at)\b.*$/i,'').replace(/\s{2,}.*$/,'').replace(/[=~_|]+/g,' ').replace(/\s*-\s*/g,' - ').replace(/\s{2,}/g,' ').replace(/[\s,.:;-]+$/,'').trim();
+  m=full.match(/\bCARRIER[ \t]*:[ \t]*([A-Za-z][^\n]{2,60})/)||full.match(/^[ \t]*carrier[ \t]*[:.]?[ \t]*([A-Za-z0-9][^\n]{2,140})$/im);if(m)out.carrier=m[1].replace(/\b(bol|vehicle|trailer|load|car or)\b.*$/i,'').trim();
   out.pos=[...new Set([...full.matchAll(new RegExp(RX.po.source,'gi'))].map(x=>fixPo(x[1])))];
 
   let cur=null,lastPo='';
@@ -86,7 +86,7 @@ async function scanPage(){
     const c=document.createElement('canvas');c.width=Math.floor(vp.width);c.height=Math.floor(vp.height);
     await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
     const text=await ocrQ(async()=>{const w=await getWorker();await w.setParameters({tessedit_pageseg_mode:'3'});const {data}=await w.recognize(c);return data.text});
-    SUG=parseBol(text);SUG.text=text;SUG.page=myPage;await applyFixes();showSuggestions();
+    SUG=parseBol(text);SUG.text=text;SUG.page=myPage;await applyFixes();autoFill();showSuggestions();
   }catch(e){box.innerHTML='<div class="sug err">Could not read the page: '+esc(e.message)+'</div>'}
 }
 
@@ -232,4 +232,17 @@ async function checkHeats(){
     HEATRES='<div class="sgc" style="margin-top:8px">'+heats.map(h=>{const r=findHeat(h,pages);return r?`<span class="chip ${r.exact?'on':'pend'}">Heat ${esc(h)} ${r.exact?'found':'close match'} on page ${r.page}</span>`:unread.length?`<span class="chip pend">Heat ${esc(h)} not found. Page${unread.length===1?'':'s'} ${unread.join(', ')} could not be read well, so check it by eye.</span>`:`<span class="chip bad">Heat ${esc(h)} not found on any page. Check for a typo.</span>`}).join('')+'</div>'+(unread.length?`<div class="muted" style="margin-top:6px;font-size:12px">Pages that could not be read clearly: ${unread.join(', ')}. Poor scans and sideways pages are the usual cause.</div>`:'');
     box.innerHTML=HEATRES;
   }catch(e){box.innerHTML='<div class="sug err">Could not check heats: '+esc(e.message)+'</div>'}
+}
+
+
+/* fill the header fields and the rows straight from the page, but never over anything already typed */
+function autoFill(){
+  if(!SUG)return;const done=[];
+  for(const f of ['bol','vendor','ship','carrier']){
+    const el=$(`input[data-f=${f}]`);
+    if(el&&!el.value.trim()&&SUG[f]){el.value=clean(f,SUG[f]);done.push(f==='ship'?'ship date':f)}
+  }
+  const noRows=!$$('#rows tr').some(tr=>$$('input',tr).some(i=>i.value));
+  if(noRows&&SUG.rows.length){$('#rows').innerHTML='';SUG.rows.forEach(r=>addRow(r));while($$('#rows tr').length<2)addRow();done.push(SUG.rows.length+' row'+(SUG.rows.length===1?'':'s'))}
+  if(done.length)ocrs('Filled from the page: '+done.join(', ')+'. Compare with the PDF. The pills below fix any single value; handwriting reads poorly, so retype those.');
 }

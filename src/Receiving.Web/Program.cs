@@ -662,8 +662,9 @@ ad.MapPost("/seed-demo", (ClaimsPrincipal u) =>
     void Add(string bol, string vendor, string ship, string carrier, string pdf, string stage, double hrs, object rows, object forms, object[] log, object[] approvals, object[] required, string d365 = "", string authBy = "", double authHrs = 0)
     {
         var id = Guid.NewGuid().ToString("N")[..12];
-        var src = Path.Combine(demoDir, pdf); var has = File.Exists(src);
+        var src = pdf == "" ? "" : Path.Combine(demoDir, pdf); var has = src != "" && File.Exists(src);
         if (has) File.Copy(src, Path.Combine(dataDir, "pdfs", id + ".pdf"), true);
+        else if (pdf == "") { File.WriteAllBytes(Path.Combine(dataDir, "pdfs", id + ".pdf"), DemoPdf.Build(bol, vendor, ship, carrier, JsonSerializer.SerializeToNode(rows)!.AsArray())); has = true; }
         var d = JsonSerializer.SerializeToNode(new { vendor, ship, carrier, rows, forms, approvals, requiredReviewers = required, log, hasPdf = has, demo = true })!.AsObject();
         if (d365 != "") d["d365"] = d365;
         if (authBy != "") { d["authBy"] = authBy; d["authAt"] = Ago(authHrs); }
