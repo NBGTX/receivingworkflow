@@ -44,3 +44,18 @@ Settings > Backups. A nightly zip (database snapshot, packet PDFs, final packets
 ## Offline libraries
 
 PDF.js and Tesseract.js (with the English language file) are bundled in `wwwroot/vendor`, so the app does not need internet access.
+
+## Day-to-day tools (Settings and Dashboard)
+
+- **Dashboard** (intake): packets by step, average time per step, packets stuck a day or more, rejects by vendor, CSV export of every inspected item.
+- **Settings > Status**: disk space, last backup, failed mail, DocuWare folder health. **Alerts** email the admins once a day per problem (failed mail, no backup for 2 days, failed backup, failed folder copy, under 5 GB free).
+- **Settings > Integrations**: extra alert addresses; copy each final packet (PDF + index CSV) to a folder on filing; rename and reorder the DocuWare index columns; upload a D365 PO list so packets with unknown POs are flagged at intake.
+- **Settings > Audit log**: search by text, user or action.
+- Users can be set to **choose their own PIN** at first sign-in; every PIN user has a Change PIN button.
+- Inspection forms warn (never block) when a measurement is outside the range printed on the paper sheet, take photos of rejects (included in the final packet), and can scan a CC # barcode (needs HTTPS and Chrome on Android). A rejected item emails the configured people.
+- Intake can check heat numbers against the mill test report pages, and the app learns a vendor's corrections.
+
+## Tests and recovery
+
+- `tests\Smoke.ps1` runs 31 end-to-end checks on a throwaway copy.
+- `deploy-src\Restore-Receiving.ps1 -Backup <zip>` restores a backup and keeps the old data folder aside.

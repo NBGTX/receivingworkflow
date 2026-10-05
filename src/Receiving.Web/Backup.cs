@@ -26,10 +26,10 @@ public sealed class BackupService : BackgroundService
             {
                 using var z = ZipFile.Open(zipPath, ZipArchiveMode.Create);
                 z.CreateEntryFromFile(snap, "receiving.db");
-                foreach (var sub in new[] { "pdfs", "final", "keys" })
+                foreach (var sub in new[] { "pdfs", "final", "keys", "photos" })
                 {
                     var dir = Path.Combine(_p.DataDir, sub); if (!Directory.Exists(dir)) continue;
-                    foreach (var f in Directory.GetFiles(dir)) z.CreateEntryFromFile(f, sub + "/" + Path.GetFileName(f));
+                    foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories)) z.CreateEntryFromFile(f, Path.GetRelativePath(_p.DataDir, f).Replace('\\', '/'));
                 }
             }
             finally { try { File.Delete(snap); } catch { } }

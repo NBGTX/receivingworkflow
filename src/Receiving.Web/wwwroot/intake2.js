@@ -62,6 +62,7 @@ function injectExtras(){
   $('#ocr').insertAdjacentHTML('afterend','<div id="sug"></div>');
   $('.ix .fh').insertAdjacentHTML('beforebegin',`<div class="vtool layoutbar"><span class="muted" style="font-size:13px">Saved layout</span><select id="laySel"><option value="">None</option></select><button class="btn sm" id="layApply">Apply</button><button class="btn sm danger" id="layDel">Delete</button></div>`);
   $('#layApply').onclick=applyLayout;
+  extraChecks();
   $('#layDel').onclick=async()=>{const n=$('#laySel').value;if(!n)return;if(!confirm('Delete the saved layout for '+n+'?'))return;try{await api('DELETE','/api/layouts/'+encodeURIComponent(n));await loadLayouts();toast('Layout deleted')}catch(e){toast(e.message,1)}};
   loadLayouts();
 }
@@ -85,7 +86,7 @@ async function scanPage(){
     const c=document.createElement('canvas');c.width=Math.floor(vp.width);c.height=Math.floor(vp.height);
     await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
     const text=await ocrQ(async()=>{const w=await getWorker();await w.setParameters({tessedit_pageseg_mode:'3'});const {data}=await w.recognize(c);return data.text});
-    SUG=parseBol(text);SUG.text=text;showSuggestions();
+    SUG=parseBol(text);SUG.text=text;SUG.page=myPage;await applyFixes();showSuggestions();
   }catch(e){box.innerHTML='<div class="sug err">Could not read the page: '+esc(e.message)+'</div>'}
 }
 
@@ -96,13 +97,15 @@ function showSuggestions(){
   box.innerHTML=`<div class="sug"><div class="sgh">Suggestions from the page <span class="muted">(check each one)</span> <button class="btn sm" id="rescan">Read this page</button></div>
    <div class="sgc">${chip('BOL #',SUG.bol,'bol')}${chip('Vendor',SUG.vendor,'vendor')}${chip('Ship date',SUG.ship,'ship')}${chip('Carrier',SUG.carrier,'carrier')}${SUG.pos.map(p=>`<button class="chip sg" data-f="po" data-v="${esc(p)}">PO <b>${esc(p)}</b></button>`).join('')}</div>
    <div class="bar" style="margin:8px 0 0">${SUG.rows.length?`<button class="btn sm pri" id="sgrows">${$$('#rows tr').some(tr=>$$('input',tr).some(i=>i.value))?'Add':'Fill'} ${SUG.rows.length} row${SUG.rows.length===1?'':'s'} from the page</button>`:'<span class="muted">No item rows recognized on this page.</span>'}
-   ${hit?`<button class="btn sm" id="sglay">Use saved layout: ${esc(hit.name)}</button>`:''}</div></div>`;
+   <button class="btn sm" id="sgheat">Check heats against the MTR pages</button>
+   ${hit?`<button class="btn sm" id="sglay">Use saved layout: ${esc(hit.name)}</button>`:''}</div>${SUG.fixed?`<div class="muted" style="margin-top:6px">${SUG.fixed} value${SUG.fixed===1?'':'s'} corrected using fixes you made on earlier packets from this vendor.</div>`:''}<div id="heatres">${HEATRES}</div></div>`;
   $$('.sg',box).forEach(b=>b.onclick=()=>{
     const f=b.dataset.f,v=b.dataset.v;
     if(f==='po'){const el=($$('#rows [data-f=po]').find(i=>!i.value)||addRow().querySelector('[data-f=po]'));el.value=v;setActive(el.closest('tr').querySelector('[data-f=heat]'))}
     else{const el=$(`[data-f=${f}]`);el.value=v;setActive(el)}
   });
   $('#rescan').onclick=scanPage;
+  $('#sgheat').onclick=checkHeats;
   const r=$('#sgrows');if(r)r.onclick=()=>fillRowsFromPage();
   const l=$('#sglay');if(l)l.onclick=()=>{$('#laySel').value=hit.name;applyLayout()};
 }
@@ -134,4 +137,98 @@ async function applyLayout(){
     pageNo=1;await rend();
     ocrs('Layout applied. Every value came from where it was last time, so check them against the PDF.');
   }catch(e){ocrs('Layout failed: '+e.message,2)}
+}
+
+
+/* ---------- duplicate BOL and PO list checks ---------- */
+let HEATRES='',poMissing=[];
+function extraChecks(){
+  HEATRES='';poMissing=[];
+  const bol=$('[data-f=bol]');bol.parentElement.insertAdjacentHTML('beforeend','<div class="hint err" id="bolw" style="margin:4px 0 0"></div>');
+  const chk=async()=>{const v=bol.value.trim(),w=$('#bolw');if(!w)return;if(!v){w.textContent='';return}try{const r=await api('GET','/api/packets/exists?bol='+encodeURIComponent(v));w.textContent=r.exists?'BOL '+v+' is already in the system.':''}catch(e){}};
+  bol.addEventListener('change',chk);bol.addEventListener('blur',chk);
+  $('.tw').insertAdjacentHTML('afterend','<div id="pow"></div>');
+  let t=null;const soon=()=>{clearTimeout(t);t=setTimeout(checkPos,700)};
+  $('#rows').addEventListener('input',e=>{if(e.target.dataset.f==='po')soon()});
+  new MutationObserver(soon).observe($('#rows'),{childList:true});
+}
+async function checkPos(){
+  const box=$('#pow');if(!box)return;
+  const pos=[...new Set($$('#rows [data-f=po]').map(i=>i.value.trim()).filter(Boolean))];
+  if(!pos.length){box.innerHTML='';poMissing=[];return}
+  try{
+    const r=await api('GET','/api/pos/check?pos='+encodeURIComponent(pos.join(',')));
+    if(!r.loaded){box.innerHTML='';poMissing=[];return}
+    poMissing=r.results.filter(x=>!x.found).map(x=>x.po);
+    box.innerHTML='<div class="sgc" style="margin-top:8px">'+r.results.map(x=>x.found?`<span class="chip on">${esc(x.po)} on the PO list${x.vendor?' ('+esc(x.vendor)+')':''}</span>`:`<span class="chip bad">${esc(x.po)} is NOT on the PO list</span>`).join('')+'</div>';
+  }catch(e){}
+}
+const _saveNew=saveNew;
+saveNew=async function(){
+  if(poMissing.length&&!confirm('These POs are not on the PO list from D365:\n\n'+poMissing.join(', ')+'\n\nSave the packet anyway?'))return;
+  const rowsBefore=$$('#rows tr').map(tr=>{const o={};$$('input',tr).forEach(i=>o[i.dataset.f]=i.value.trim());return o}).filter(r=>r.po);
+  const vend=$('[data-f=vendor]')?.value.trim(),sug=SUG;
+  await _saveNew();
+  if(location.hash.startsWith('#/p/')&&vend&&sug)learnFixes(vend,sug,rowsBefore);
+};
+
+/* ---------- learn from corrections ---------- */
+function dist(a,b){const m=a.length,n=b.length,d=Array.from({length:m+1},(_,i)=>[i]);for(let j=1;j<=n;j++)d[0][j]=j;for(let i=1;i<=m;i++)for(let j=1;j<=n;j++)d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1));return d[m][n]}
+async function learnFixes(vendor,sug,finalRows){
+  const fixes={};const note=(f,from,to)=>{if(from&&to&&from!==to&&dist(from,to)<=3)(fixes[f]=fixes[f]||{})[from]=to};
+  finalRows.forEach((row,i)=>{const s=sug.rows.find(x=>x.cc&&x.cc===row.cc)||sug.rows.find(x=>x.coil&&x.coil===row.coil)||sug.rows[i];if(!s)return;['heat','cc','coil','po','desc'].forEach(f=>note(f,s[f],row[f]))});
+  if(!Object.keys(fixes).length)return;
+  try{
+    let lay={v:1,picks:{},fixes:{}};
+    try{lay=await api('GET','/api/layouts/'+encodeURIComponent(vendor))}catch(e){}
+    lay.fixes=lay.fixes||{};for(const f in fixes)lay.fixes[f]={...(lay.fixes[f]||{}),...fixes[f]};
+    await api('PUT','/api/layouts/'+encodeURIComponent(vendor),lay);
+  }catch(e){}
+}
+async function applyFixes(){
+  SUG.fixed=0;
+  const hit=layoutList.find(l=>SUG.text.toLowerCase().includes(l.name.toLowerCase())||(SUG.vendor&&SUG.vendor.toLowerCase().includes(l.name.toLowerCase())));
+  if(!hit)return;
+  try{
+    const lay=await api('GET','/api/layouts/'+encodeURIComponent(hit.name));const fx=lay.fixes||{};
+    SUG.rows.forEach(r=>['heat','cc','coil','po','desc'].forEach(f=>{const to=fx[f]&&fx[f][r[f]];if(to){r[f]=to;SUG.fixed++}}));
+    ['bol','ship'].forEach(f=>{const to=fx[f]&&fx[f][SUG[f]];if(to){SUG[f]=to;SUG.fixed++}});
+  }catch(e){}
+}
+
+/* ---------- check each heat against the other pages (the mill test reports) ---------- */
+async function readPageText(n){
+  const pg=await pdf.getPage(n);let best='',score=-1;
+  for(const extra of [0,90,270]){
+    const vp=pg.getViewport({scale:2.2,rotation:((pg.rotate||0)+(rot[n]||0)+extra)%360});
+    const c=document.createElement('canvas');c.width=Math.floor(vp.width);c.height=Math.floor(vp.height);
+    await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
+    const text=await ocrQ(async()=>{const w=await getWorker();await w.setParameters({tessedit_pageseg_mode:'3'});return (await w.recognize(c)).data.text});
+    const sc=(text.match(/\b[A-Za-z]{4,}\b/g)||[]).length;
+    if(sc>score){score=sc;best=text}
+    if(sc>=40)break;                   // reads as upright text, no need to try the other turns
+  }
+  return best;
+}
+const normH=t=>String(t).toUpperCase().replace(/[^A-Z0-9]/g,'');
+function findHeat(h,pages){
+  const H=normH(h);if(H.length<4)return null;
+  for(const p of pages){if(normH(p.text).includes(H))return {page:p.n,exact:true}}
+  for(const p of pages){const T=normH(p.text);for(let i=0;i+H.length<=T.length;i++){let bad=0;for(let j=0;j<H.length&&bad<2;j++)if(T[i+j]!==H[j])bad++;if(bad<=1)return {page:p.n,exact:false}}}
+  return null;
+}
+async function checkHeats(){
+  if(!pdf)return;const box=$('#heatres');
+  const heats=[...new Set($$('#rows [data-f=heat]').map(i=>i.value.trim()).filter(Boolean))];
+  if(!heats.length)return toast('Fill in some heat numbers first',1);
+  const skip=pdf.numPages>1?(SUG&&SUG.page)||1:0,pages=[];
+  try{
+    for(let n=1;n<=pdf.numPages;n++){
+      if(n===skip)continue;
+      box.innerHTML=`<div class="sug busy">Reading page ${n} of ${pdf.numPages} for heat numbers. A packet takes a few minutes.</div>`;
+      pages.push({n,text:await readPageText(n)});
+    }
+    HEATRES='<div class="sgc" style="margin-top:8px">'+heats.map(h=>{const r=findHeat(h,pages);return r?`<span class="chip ${r.exact?'on':'pend'}">Heat ${esc(h)} ${r.exact?'found':'close match'} on page ${r.page}</span>`:`<span class="chip bad">Heat ${esc(h)} not found on any page. Check for a typo.</span>`}).join('')+'</div>';
+    box.innerHTML=HEATRES;
+  }catch(e){box.innerHTML='<div class="sug err">Could not check heats: '+esc(e.message)+'</div>'}
 }

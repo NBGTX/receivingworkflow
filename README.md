@@ -6,7 +6,8 @@ Paperless steel receiving for Nucor Building Systems Texas (Terrell, TX): packet
 - `PLAN.md` - scope, workflow, data model.
 - `Inspections/` - the blank paper inspection sheets the forms are built from.
 - `Project Folder/`, `Steel_Receiving_Workflow_Outline_Paperless.md` - earlier DocuWare-based design notes.
-- `app.html`, `prototype.html`, `mockup.html` - early clickable prototypes, kept for reference.
+- `deploy-src/` - `Deploy.ps1` (one-command server update), `Install-Receiving.ps1`, `Restore-Receiving.ps1`.
+- `tests/Smoke.ps1` - end-to-end check of the whole workflow on a throwaway copy (31 checks).
 
 Quick start:
 

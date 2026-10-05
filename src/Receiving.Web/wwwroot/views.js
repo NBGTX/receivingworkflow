@@ -86,7 +86,7 @@ function viewPacket(id){
   const vp=$('#viewpdf');if(vp)vp.onclick=()=>openPdf(p);
   $$('.type').forEach(b=>b.onclick=()=>nav('/p/'+p.id+'/f/'+encodeURIComponent(b.dataset.po)+'/'+b.dataset.t));
   const act=async(path,body,msg)=>{try{const r=await api('POST','/api/packets/'+p.id+'/'+path,body||{});upsert(r);if(msg)toast(msg);viewPacket(p.id)}catch(e){toast(e.message,1)}};
-  const c=$('#complete');if(c)c.onclick=()=>act('complete',null,'Sent to review');
+  const c=$('#complete');if(c)c.onclick=()=>{const w=shortShipCheck(p);if(w&&!confirm(w))return;act('complete',null,'Sent to review')};
   const ap=$('#approve');if(ap)ap.onclick=()=>act('approve',null,'Approved');
   const r=$('#recv');if(r)r.onclick=()=>{const v=$('#d365').value.trim();if(!v)return toast('Enter the D365 receipt number',1);act('receive',{d365:v})};
   const a=$('#auth');if(a)a.onclick=()=>act('authorize',null,'Packet filed');
@@ -179,6 +179,7 @@ async function viewForm(id,po,tk){
   let t=null;const autosave=()=>{clearTimeout(t);$('#saved').textContent='Saving...';t=setTimeout(async()=>{try{await push(false);$('#saved').textContent='Draft saved'}catch(e){$('#saved').textContent=e.message}},700)};
   const draw=()=>{
     $('#items').innerHTML=f.items.map(itemHtml).join('');
+    enhanceItems({id,po,tk,T,f,canEdit,collect,autosave,draw});
     if(!canEdit)return;
     $$('#items input').forEach(i=>i.addEventListener('input',autosave));
     $$('#items [data-k=src]').forEach(sel=>sel.addEventListener('change',()=>{

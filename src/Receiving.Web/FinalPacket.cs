@@ -78,7 +78,7 @@ public static class FinalPacket
         public void Close() { G?.Dispose(); }
     }
 
-    public static byte[] Build(string bol, string stage, JsonObject d, string? originalPdf, string siteName)
+    public static byte[] Build(string bol, string stage, JsonObject d, string? originalPdf, string siteName, string? photosDir = null)
     {
         var doc = new PdfDocument();
         var rows = d["rows"]!.AsArray().Select(r => r!.AsObject()).ToList();
@@ -273,6 +273,44 @@ public static class FinalPacket
             }
             Text(iw.G, "Completed in the Steel Receiving app. Inspector: " + S(f, "by") + ".", F(7.5), Mute, 36, iw.H - 30);
             iw.Close();
+        }
+
+        // ---------------- photos taken during inspection ----------------
+        if (photosDir != null && Directory.Exists(photosDir))
+        {
+            var shots = new List<(string cap, string path)>();
+            foreach (var (po, sh, f) in inspections)
+                if (f["items"] is JsonArray pia)
+                    foreach (var it in pia.Select(x => x!.AsObject()))
+                        if (it["photos"] is JsonArray ph)
+                            foreach (var n in ph) { var path = Path.Combine(photosDir, Path.GetFileName(n!.ToString())); if (File.Exists(path)) shots.Add(($"CC {S(it, "cc")}  |  {sh.Title}  |  PO {po}" + (S(it, "comments") != "" ? "  |  " + S(it, "comments") : ""), path)); }
+            if (shots.Count > 0)
+            {
+                var pw = new Writer(doc); bool firstP = true; int col = 0; double rowTop = 0; const double cellW = 252, cellH = 200;
+                void PhotoPage()
+                {
+                    pw.NewPage(false, 40); Fill(pw.G, Dark, 0, 0, pw.W, 46);
+                    Text(pw.G, firstP ? "INSPECTION PHOTOS" : "INSPECTION PHOTOS (continued)", F(14, true), XColor.FromArgb(255, 255, 255), 40, 13);
+                    Text(pw.G, "BOL " + bol, F(12, true), XColor.FromArgb(255, 255, 255), pw.W - 40, 15, 300, true);
+                    pw.Y = 64; firstP = false; col = 0; rowTop = pw.Y;
+                }
+                PhotoPage();
+                foreach (var (cap, path) in shots)
+                {
+                    if (col == 0) { rowTop = pw.Y; if (rowTop + cellH + 40 > pw.H - 44) { PhotoPage(); } }
+                    var x0 = 40 + col * (cellW + 28);
+                    try
+                    {
+                        using var img = XImage.FromFile(path);
+                        var sc = Math.Min(cellW / img.PixelWidth, cellH / img.PixelHeight);
+                        pw.G.DrawImage(img, x0, rowTop, img.PixelWidth * sc, img.PixelHeight * sc);
+                    }
+                    catch { Text(pw.G, "(photo could not be read)", F(8), Mute, x0, rowTop); }
+                    foreach (var (ln, i) in Wrap(pw.G, cap, F(8), cellW).Take(3).Select((l, i) => (l, i))) Text(pw.G, ln, F(8), Mute, x0, rowTop + cellH + 4 + i * 10);
+                    col++; if (col == 2) { col = 0; pw.Y = rowTop + cellH + 44; }
+                }
+                pw.Close();
+            }
         }
 
         // ---------------- activity record ----------------

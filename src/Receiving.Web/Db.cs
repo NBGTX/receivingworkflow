@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGE
 
     public void Migrate()
     {
+        try { Exec("ALTER TABLE users ADD COLUMN must_change INTEGER NOT NULL DEFAULT 0"); } catch { /* already there */ }
         Exec("CREATE TABLE IF NOT EXISTS locks(k TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, expires INTEGER NOT NULL)");
         Exec("CREATE TABLE IF NOT EXISTS layouts(name TEXT PRIMARY KEY COLLATE NOCASE, data TEXT NOT NULL, updated INTEGER NOT NULL)");
         try { Exec("ALTER TABLE outbox ADD COLUMN html TEXT"); } catch { /* already there */ }

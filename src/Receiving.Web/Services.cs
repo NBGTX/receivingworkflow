@@ -32,6 +32,11 @@ public class GeneralCfg
     public string BackupTime { get; set; } = "02:00";
     public string BackupFolder { get; set; } = "";   // blank = data\backups
     public int BackupKeep { get; set; } = 14;
+    public string AlertEmails { get; set; } = "";
+    public bool DropEnabled { get; set; } = false;
+    public string DropFolder { get; set; } = "";
+    public string DropName { get; set; } = "BOL {bol} final packet";
+    public bool DropCsv { get; set; } = true;
 }
 
 public class NotifCfg
@@ -85,6 +90,8 @@ public sealed class SettingsStore
         }).ToList();
     }
     public void SetNotifs(List<NotifCfg> n) => Put("notifs", n);
+    public T GetJson<T>(string key, T def) => Get(key, () => def);
+    public void PutJson<T>(string key, T val) => Put(key, val);
 
     static readonly HashSet<string> OldBodies =
     [
@@ -109,6 +116,9 @@ public sealed class SettingsStore
         new() { Event = "received", Label = "Received in D365, ready to authorize", Roles = ["coordinator"],
             Subject = "Ready to authorize: BOL {{bol}}",
             Body = "{{actor}} received this packet in D365 (receipt {{d365}}).\n\nIt is ready for you to authorize." },
+        new() { Event = "reject", Label = "An inspection has a rejected item", Roles = ["coordinator"],
+            Subject = "Rejected item: BOL {{bol}} ({{vendor}})",
+            Body = "{{actor}} marked an item as rejected on BOL {{bol}}.\n\n{{rejects}}\n\nReview it and contact the vendor if needed." },
         new() { Event = "filed", Label = "Final: packet authorized and filed", Roles = ["coordinator", "reviewer"],
             Subject = "Receiving complete: BOL {{bol}}",
             Body = "{{actor}} authorized this packet and it is now filed.\n\nUpload the PDF to DocuWare and tag it with the index sheet from the packet page." },

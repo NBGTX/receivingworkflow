@@ -24,6 +24,7 @@ builder.Services.AddSingleton(new DataPaths(dataDir));
 builder.Services.AddSingleton<BackupService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BackupService>());
 builder.Services.AddSingleton<Mailer>();
+builder.Services.AddHostedService<AlertService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Mailer>());
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 100L * 1024 * 1024);
 // IIS must not sign people in on its own: only our cookie counts, and Windows login runs only on /api/auth/windows.
@@ -45,6 +46,7 @@ var db = app.Services.GetRequiredService<Db>();
 var cfg = app.Services.GetRequiredService<SettingsStore>();
 var mail = app.Services.GetRequiredService<Mailer>();
 var backup = app.Services.GetRequiredService<BackupService>();
+var fctx = new FeatureCtx(app, db, cfg, mail, dataDir, GetMe, Origin, LoadPacket);
 // In-process IIS has its own Windows login; Kestrel uses the Negotiate handler.
 var underIis = app.Services.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>().GetType().Name.Contains("IIS", StringComparison.OrdinalIgnoreCase)
     || Environment.GetEnvironmentVariable("ASPNETCORE_IIS_HTTPAUTH") != null;
@@ -64,6 +66,13 @@ app.Use(async (c, next) =>
 });
 app.UseAuthentication();
 app.UseAuthorization();
+app.Use(async (c, next) =>
+{
+    // someone whose PIN was just set by an admin may only change it
+    if (c.User.Identity?.IsAuthenticated == true && c.User.FindFirstValue("mustchange") == "1" && c.Request.Path.StartsWithSegments("/api") && !c.Request.Path.StartsWithSegments("/api/auth") && !c.Request.Path.StartsWithSegments("/api/config"))
+    { c.Response.StatusCode = 403; await c.Response.WriteAsJsonAsync(new { error = "Choose a new PIN first.", mustChange = true }); return; }
+    await next();
+});
 
 static long Now() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 string[] AllRoles = ["receiver", "coordinator", "reviewer"];
@@ -80,19 +89,19 @@ api.MapGet("/auth/me", (ClaimsPrincipal u) => GetMe(u) is { } m ? Results.Ok(MeJ
 api.MapPost("/auth/pin", async (HttpContext c, PinReq req) =>
 {
     var g = cfg.General();
-    var u = db.One("SELECT id,name,initials,roles,pin_hash,pin_salt,active,failed,locked_until FROM users WHERE id=$0",
-        r => new { Id = r.GetInt64(0), Name = r.GetString(1), Ini = r.GetString(2), Roles = r.GetString(3), H = r.IsDBNull(4) ? null : r.GetString(4), S = r.IsDBNull(5) ? null : r.GetString(5), Act = r.GetInt32(6) == 1, Fail = r.GetInt32(7), Lock = r.GetInt64(8) }, req.UserId);
+    var u = db.One("SELECT id,name,initials,roles,pin_hash,pin_salt,active,failed,locked_until,must_change FROM users WHERE id=$0",
+        r => new { Id = r.GetInt64(0), Name = r.GetString(1), Ini = r.GetString(2), Roles = r.GetString(3), H = r.IsDBNull(4) ? null : r.GetString(4), S = r.IsDBNull(5) ? null : r.GetString(5), Act = r.GetInt32(6) == 1, Fail = r.GetInt32(7), Lock = r.GetInt64(8), Must = r.GetInt32(9) == 1 }, req.UserId);
     if (u == null || !u.Act) return Results.Json(new { error = "Unknown user" }, statusCode: 401);
     if (u.Lock > Now()) return Results.Json(new { error = $"Locked. Try again in {Math.Ceiling((u.Lock - Now()) / 60000.0)} min or ask an admin." }, statusCode: 423);
     if (!Pin.Check(req.Pin ?? "", u.H, u.S))
     {
         var f = u.Fail + 1; var lockTo = f >= g.MaxFailed ? Now() + g.LockMinutes * 60000L : 0;
         db.Exec("UPDATE users SET failed=$1, locked_until=$2 WHERE id=$0", u.Id, lockTo == 0 ? f : 0, lockTo);
-        db.Audit(u.Name, "pin_fail", $"attempt {f}");
+        db.Audit(u.Name, lockTo > 0 ? "pin_locked" : "pin_fail", $"attempt {f}");
         return Results.Json(new { error = lockTo > 0 ? $"Too many tries. Locked for {g.LockMinutes} min." : "Wrong PIN" }, statusCode: 401);
     }
     db.Exec("UPDATE users SET failed=0, locked_until=0 WHERE id=$0", u.Id);
-    var me = new Me("pin", u.Id.ToString(), u.Name, u.Ini, u.Roles.Split(',', StringSplitOptions.RemoveEmptyEntries));
+    var me = new Me("pin", u.Id.ToString(), u.Name, u.Ini, u.Roles.Split(',', StringSplitOptions.RemoveEmptyEntries), u.Must);
     await c.SignInAsync(Principal(me));
     db.Audit(u.Name, "login", "pin");
     return Results.Ok(MeJson(me));
@@ -137,6 +146,22 @@ api.MapGet("/auth/windows", async (HttpContext c) =>
     db.Audit(acct, "login", "windows");
     if (nav) { c.Response.Redirect("/#/"); return; }
     await c.Response.WriteAsJsonAsync(MeJson(me));
+});
+
+api.MapPost("/auth/change-pin", async (HttpContext c, ChangePinReq req) =>
+{
+    var me = GetMe(c.User); if (me == null || me.Kind != "pin") return Results.Unauthorized();
+    var len = cfg.General().PinLength;
+    if (string.IsNullOrEmpty(req.New) || req.New.Length != len || !req.New.All(char.IsDigit)) return Results.BadRequest(new { error = $"New PIN must be {len} digits." });
+    var row = db.One("SELECT pin_hash,pin_salt FROM users WHERE id=$0", r => new { H = r.IsDBNull(0) ? null : r.GetString(0), S = r.IsDBNull(1) ? null : r.GetString(1) }, long.Parse(me.Id));
+    if (row == null || !Pin.Check(req.Current ?? "", row.H, row.S)) return Results.Json(new { error = "Current PIN is wrong." }, statusCode: 400);
+    if (req.New == req.Current) return Results.BadRequest(new { error = "Pick a different PIN." });
+    var (h, s) = Pin.Make(req.New);
+    db.Exec("UPDATE users SET pin_hash=$1,pin_salt=$2,must_change=0,failed=0,locked_until=0 WHERE id=$0", long.Parse(me.Id), h, s);
+    db.Audit(me.Name, "pin_changed", "");
+    var fresh = new Me("pin", me.Id, me.Name, me.Initials, me.Roles, false);
+    await c.SignInAsync(Principal(fresh));
+    return Results.Ok(MeJson(fresh));
 });
 
 api.MapPost("/auth/logout", async (HttpContext c) => { await c.SignOutAsync(); return Results.Ok(); });
@@ -202,11 +227,11 @@ string FinalPath(string id) => Path.Combine(dataDir, "final", Path.GetFileName(i
 byte[] BuildFinal(PacketRec p)
 {
     var orig = Path.Combine(dataDir, "pdfs", Path.GetFileName(p.Id) + ".pdf");
-    return FinalPacket.Build(p.Bol, p.Stage, p.Data, File.Exists(orig) ? orig : null, cfg.General().SiteName);
+    return FinalPacket.Build(p.Bol, p.Stage, p.Data, File.Exists(orig) ? orig : null, cfg.General().SiteName, Path.Combine(dataDir, "photos", Path.GetFileName(p.Id)));
 }
-void StoreFinal(PacketRec p) { try { File.WriteAllBytes(FinalPath(p.Id), BuildFinal(p)); } catch (Exception ex) { app.Logger.LogError(ex, "Could not store final packet for {Bol}", p.Bol); } }
+void StoreFinal(PacketRec p) { try { var bytes = BuildFinal(p); File.WriteAllBytes(FinalPath(p.Id), bytes); Features.DropFinal(fctx, p, bytes); } catch (Exception ex) { app.Logger.LogError(ex, "Could not store final packet for {Bol}", p.Bol); } }
 
-pk.MapGet("/{id}/final.pdf", (string id, bool? inline, ClaimsPrincipal u) =>
+pk.MapGet("/{id}/final.pdf", (string id, string? inline, ClaimsPrincipal u) =>
 {
     var p = LoadPacket(id); if (p == null || (IsDraft(p.Data) && !GetMe(u)!.Has("coordinator"))) return Results.NotFound();
     byte[] bytes;
@@ -216,21 +241,27 @@ pk.MapGet("/{id}/final.pdf", (string id, bool? inline, ClaimsPrincipal u) =>
         bytes = File.Exists(FinalPath(id)) ? File.ReadAllBytes(FinalPath(id)) : BuildFinal(p);
     }
     else bytes = BuildFinal(p);                               // preview only, not stored
-    return inline == true ? Results.File(bytes, "application/pdf") : Results.File(bytes, "application/pdf", $"BOL {p.Bol} final packet.pdf");
+    return inline is "1" or "true" ? Results.File(bytes, "application/pdf") : Results.File(bytes, "application/pdf", $"BOL {p.Bol} final packet.pdf");
 });
 
 pk.MapGet("/{id}/csv", (string id) =>
 {
     var p = LoadPacket(id); if (p == null) return Results.NotFound();
-    string Q(string? s) => "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
-    var d = p.Data; var sb = new StringBuilder();
-    sb.AppendLine(string.Join(",", new[] { "BOL #", "Vendor", "Ship date", "PO #", "Heat #", "Mill coil / bundle #", "CC # (NBS#)", "Description", "Length", "Weight", "D365 receipt #", "Authorized by" }.Select(Q)));
-    foreach (var r in d["rows"]!.AsArray())
-        sb.AppendLine(string.Join(",", new[] { p.Bol, Str(d, "vendor"), Str(d, "ship"), Str(r, "po"), Str(r, "heat"), Str(r, "coil"), Str(r, "cc"), Str(r, "desc"), Str(r, "len"), Str(r, "wt"), Str(d, "d365"), Str(d, "authBy") }.Select(Q)));
-    return Results.File(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray(), "text/csv", $"DocuWare index BOL {p.Bol}.csv");
+    return Results.File(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(Features.DocuwareCsv(cfg, p.Bol, p.Data))).ToArray(), "text/csv", $"DocuWare index BOL {p.Bol}.csv");
 });
 
-pk.MapPut("/{id}/forms/{po}/{type}", (string id, string po, string type, ClaimsPrincipal u, JsonObject body) =>
+pk.MapPost("/{id}/drop", (string id, ClaimsPrincipal u) =>
+{
+    var me = GetMe(u)!; if (!me.Has("coordinator")) return Results.Forbid();
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage != "filed") return Results.Conflict(new { error = "Only a filed packet can be copied to the folder." });
+    if (!File.Exists(FinalPath(id))) StoreFinal(p);
+    var r = Features.DropFinal(fctx, p, File.Exists(FinalPath(id)) ? File.ReadAllBytes(FinalPath(id)) : BuildFinal(p));
+    if (r == "") return Results.BadRequest(new { error = "The folder copy is switched off or has no folder. Set it in Settings > Integrations." });
+    return r.StartsWith("ERR:") ? Results.BadRequest(new { error = r[4..] }) : Results.Ok(new { file = r });
+});
+
+pk.MapPut("/{id}/forms/{po}/{type}", (string id, string po, string type, ClaimsPrincipal u, HttpContext c, JsonObject body) =>
 {
     var me = GetMe(u)!; if (!me.Has("receiver", "coordinator")) return Results.Forbid();
     var p = LoadPacket(id); if (p == null) return Results.NotFound();
@@ -248,6 +279,18 @@ pk.MapPut("/{id}/forms/{po}/{type}", (string id, string po, string type, ClaimsP
         AddLog(p.Data, me.Initials, $"Submitted {TypeName(type)} inspection for {po}");
     }
     p.Save();
+    if (submit && forms[key]!["items"] is JsonArray its)
+    {
+        var labels = new Dictionary<string, string> { ["surface"] = "Surface", ["cert"] = "Cert.", ["visual"] = "Visual Insp." };
+        var rej = new List<string>();
+        foreach (var it in its.Select(i => i!.AsObject()))
+        {
+            if (it["skip"]?.ToString() is "True" or "true") continue;
+            var bad = it.Where(a => a.Value?.ToString() == "bad").Select(a => labels.GetValueOrDefault(a.Key, a.Key)).ToList();
+            if (bad.Count > 0) rej.Add($"CC {Str(it, "cc")} ({TypeName(type)}, PO {po}): {string.Join(", ", bad)}" + (Str(it, "comments") != "" ? " - " + Str(it, "comments") : ""));
+        }
+        if (rej.Count > 0) { AddLog(p.Data, "System", $"{rej.Count} rejected item(s) on the {TypeName(type)} inspection for {po}"); p.Save(); Notify("reject", p, me.Name, Origin(c), new Dictionary<string, string> { ["rejects"] = string.Join("\n", rej) }); }
+    }
     return Results.Ok(p.ToJson());
 });
 
@@ -481,8 +524,8 @@ ad.MapPost("/users", (ClaimsPrincipal u, UserReq q) =>
 {
     var err = ValidateUser(q, true); if (err != null) return Results.BadRequest(new { error = err });
     var (h, s) = string.IsNullOrEmpty(q.Pin) ? ((string?)null, (string?)null) : Pin.Make(q.Pin);
-    var id = db.Insert("INSERT INTO users(name,initials,email,roles,pin_hash,pin_salt,active,created) VALUES($0,$1,$2,$3,$4,$5,1,$6)",
-        q.Name!.Trim(), (q.Initials ?? Initials(q.Name!, "")).Trim().ToUpperInvariant(), (q.Email ?? "").Trim(), string.Join(",", q.Roles!), h, s, Now());
+    var id = db.Insert("INSERT INTO users(name,initials,email,roles,pin_hash,pin_salt,active,created,must_change) VALUES($0,$1,$2,$3,$4,$5,1,$6,$7)",
+        q.Name!.Trim(), (q.Initials ?? Initials(q.Name!, "")).Trim().ToUpperInvariant(), (q.Email ?? "").Trim(), string.Join(",", q.Roles!), h, s, Now(), q.MustChange == true && !string.IsNullOrEmpty(q.Pin) ? 1 : 0);
     db.Audit(GetMe(u)!.Name, "user_create", q.Name!);
     return Results.Ok(new { id });
 });
@@ -491,7 +534,7 @@ ad.MapPut("/users/{id:long}", (long id, ClaimsPrincipal u, UserReq q) =>
 {
     var err = ValidateUser(q, false); if (err != null) return Results.BadRequest(new { error = err });
     db.Exec("UPDATE users SET name=$1,initials=$2,email=$3,roles=$4,active=$5 WHERE id=$0", id, q.Name!.Trim(), (q.Initials ?? "").Trim().ToUpperInvariant(), (q.Email ?? "").Trim(), string.Join(",", q.Roles!), q.Active == false ? 0 : 1);
-    if (!string.IsNullOrEmpty(q.Pin)) { var (h, s) = Pin.Make(q.Pin); db.Exec("UPDATE users SET pin_hash=$1,pin_salt=$2,failed=0,locked_until=0 WHERE id=$0", id, h, s); }
+    if (!string.IsNullOrEmpty(q.Pin)) { var (h, s) = Pin.Make(q.Pin); db.Exec("UPDATE users SET pin_hash=$1,pin_salt=$2,failed=0,locked_until=0,must_change=$3 WHERE id=$0", id, h, s, q.MustChange == true ? 1 : 0); }
     if (q.Unlock == true) db.Exec("UPDATE users SET failed=0,locked_until=0 WHERE id=$0", id);
     db.Audit(GetMe(u)!.Name, "user_update", q.Name!);
     return Results.Ok();
@@ -568,6 +611,7 @@ void DeleteOne(string id)
 {
     var f = Path.Combine(dataDir, "pdfs", Path.GetFileName(id) + ".pdf"); if (File.Exists(f)) File.Delete(f);
     var ff = Path.Combine(dataDir, "final", Path.GetFileName(id) + ".pdf"); if (File.Exists(ff)) File.Delete(ff);
+    var pd = Path.Combine(dataDir, "photos", Path.GetFileName(id)); if (Directory.Exists(pd)) Directory.Delete(pd, true);
     db.Exec("DELETE FROM outbox WHERE packet_id=$0", id);
     db.Exec("DELETE FROM locks WHERE k LIKE $0", id + "|%");
     db.Exec("DELETE FROM packets WHERE id=$0", id);
@@ -693,8 +737,8 @@ ad.MapPost("/seed-demo", (ClaimsPrincipal u) =>
 ad.MapGet("/outbox", () => db.Query("SELECT id,to_addr,subject,event,status,attempts,error,created,sent_at FROM outbox ORDER BY id DESC LIMIT 100",
     r => new { id = r.GetInt64(0), to = r.GetString(1), subject = r.GetString(2), evt = r.IsDBNull(3) ? "" : r.GetString(3), status = r.GetString(4), attempts = r.GetInt32(5), error = r.IsDBNull(6) ? "" : r.GetString(6), created = r.GetInt64(7), sentAt = r.IsDBNull(8) ? 0 : r.GetInt64(8) }));
 ad.MapPost("/outbox/{id:long}/retry", (long id) => { db.Exec("UPDATE outbox SET status='pending',attempts=0,next_try=0 WHERE id=$0", id); return Results.Ok(); });
-ad.MapGet("/audit", () => db.Query("SELECT ts,actor,action,detail FROM audit ORDER BY id DESC LIMIT 200", r => new { ts = r.GetInt64(0), actor = r.IsDBNull(1) ? "" : r.GetString(1), action = r.GetString(2), detail = r.IsDBNull(3) ? "" : r.GetString(3) }));
 
+Features.Map(fctx);
 app.MapFallbackToFile("index.html");
 app.Run();
 
@@ -703,12 +747,13 @@ Me? GetMe(ClaimsPrincipal u)
 {
     if (u.Identity?.IsAuthenticated != true || u.Identity.AuthenticationType != CookieAuthenticationDefaults.AuthenticationScheme) return null;   // ignore a raw Windows identity from IIS
     return new Me(u.FindFirstValue("kind") ?? "pin", u.FindFirstValue(ClaimTypes.NameIdentifier) ?? "", u.FindFirstValue(ClaimTypes.Name) ?? "", u.FindFirstValue("initials") ?? "",
-        u.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray());
+        u.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray(), u.FindFirstValue("mustchange") == "1");
 }
-object MeJson(Me m) => new { m.Kind, m.Id, m.Name, m.Initials, m.Roles, idleMinutes = cfg.General().IdleMinutes };
+object MeJson(Me m) => new { m.Kind, m.Id, m.Name, m.Initials, m.Roles, m.MustChange, idleMinutes = cfg.General().IdleMinutes };
 ClaimsPrincipal Principal(Me m)
 {
     var cl = new List<Claim> { new(ClaimTypes.NameIdentifier, m.Id), new(ClaimTypes.Name, m.Name), new("initials", m.Initials), new("kind", m.Kind) };
+    if (m.MustChange) cl.Add(new Claim("mustchange", "1"));
     cl.AddRange(m.Roles.Select(r => new Claim(ClaimTypes.Role, r)));
     return new ClaimsPrincipal(new ClaimsIdentity(cl, CookieAuthenticationDefaults.AuthenticationScheme));
 }
@@ -743,13 +788,15 @@ JsonObject PacketJson(string id, string bol, string stage, long created, long up
 PacketRec? LoadPacket(string id) =>
     db.One("SELECT id,bol,stage,created,data FROM packets WHERE id=$0", r => new PacketRec(db, r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt64(3), JsonNode.Parse(r.GetString(4))!.AsObject()), id);
 
-(string subject, string text, string html) Compose(string evt, NotifCfg n, JsonObject d, string bol, string stage, string id, string actor, string origin, bool preview)
+(string subject, string text, string html) Compose(string evt, NotifCfg n, JsonObject d, string bol, string stage, string id, string actor, string origin, bool preview, Dictionary<string, string>? extra = null)
 {
     var vars = new Dictionary<string, string>
     {
         ["bol"] = bol, ["vendor"] = Str(d, "vendor"), ["pos"] = string.Join(", ", Pos(d)), ["items"] = d["rows"]!.AsArray().Count.ToString(),
         ["actor"] = actor, ["d365"] = Str(d, "d365"), ["stage"] = stage, ["link"] = $"{origin}/#/p/{id}"
     };
+    if (extra != null) foreach (var kv in extra) vars[kv.Key] = kv.Value;
+    if (!vars.ContainsKey("rejects")) vars["rejects"] = "CC 161886 (Tube, PO TX-0015373): Surface - scratch near end";
     var subject = Mailer.Render(n.Subject, vars); var intro = Mailer.Render(n.Body, vars);
     var facts = new List<(string, string)> { ("BOL #", bol), ("Vendor", Str(d, "vendor")), ("Ship date", Str(d, "ship")), ("Carrier", Str(d, "carrier")), ("PO #", string.Join(", ", Pos(d))) };
     if (evt is "received" or "filed") facts.Add(("D365 receipt", Str(d, "d365")));
@@ -761,7 +808,7 @@ PacketRec? LoadPacket(string id) =>
     return (subject, MailHtml.Text(site, st, intro, facts, items, link), html);
 }
 
-void Notify(string evt, PacketRec p, string actor, string origin)
+void Notify(string evt, PacketRec p, string actor, string origin, Dictionary<string, string>? extra = null)
 {
     var n = cfg.Notifs().FirstOrDefault(x => x.Event == evt); if (n == null || !n.Enabled) return;
     var to = new List<string>();
@@ -769,7 +816,7 @@ void Notify(string evt, PacketRec p, string actor, string origin)
         to.AddRange(db.Query("SELECT email FROM users WHERE active=1 AND email<>'' AND (',' || roles || ',') LIKE $0", r => r.GetString(0), "%," + role + ",%"));
     foreach (var uid in n.UserIds) to.AddRange(db.Query("SELECT email FROM users WHERE active=1 AND email<>'' AND id=$0", r => r.GetString(0), uid));
     to.AddRange(n.Extra.Split(new[] { ',', ';', ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries));
-    var (subject, text, html) = Compose(evt, n, p.Data, p.Bol, p.Stage, p.Id, actor, origin, false);
+    var (subject, text, html) = Compose(evt, n, p.Data, p.Bol, p.Stage, p.Id, actor, origin, false, extra);
     mail.Enqueue(evt, p.Id, to, subject, text, html);
 }
 
@@ -782,13 +829,14 @@ void NotifyUsers(string evt, PacketRec p, string actor, string origin, IEnumerab
     mail.Enqueue(evt, p.Id, to, subject, text, html);
 }
 
-record Me(string Kind, string Id, string Name, string Initials, string[] Roles)
+record Me(string Kind, string Id, string Name, string Initials, string[] Roles, bool MustChange = false)
 {
     public bool Admin => Roles.Contains("admin");
     public bool Has(params string[] r) => Admin || r.Any(Roles.Contains);
 }
 record PinReq(long UserId, string? Pin);
-record UserReq(string? Name, string? Initials, string? Email, string[]? Roles, string? Pin, bool? Active, bool? Unlock);
+record UserReq(string? Name, string? Initials, string? Email, string[]? Roles, string? Pin, bool? Active, bool? Unlock, bool? MustChange);
+record ChangePinReq(string? Current, string? New);
 record AdminReq(string? Account, string? Name, string? Email);
 record SmtpReq(string? Host, int Port, string? Security, string? User, string? FromAddr, string? FromName, string? Password);
 record SettingsReq(GeneralCfg General, SmtpReq Smtp, List<NotifCfg> Notifs);

@@ -13,6 +13,7 @@ const IC={
  dl:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
  info:'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
  gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+ chart:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
  stamp:'<path d="M9 11V6a3 3 0 1 1 6 0v5"/><path d="M5 21h14v-4a3 3 0 0 0-3-3H8a3 3 0 0 0-3 3z"/>',
  out:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'};
 const ic=n=>`<svg class="ic" viewBox="0 0 24 24">${IC[n]||''}</svg>`;
@@ -98,6 +99,7 @@ function pinPad(id,name,ini){
 function firstRoute(){return has('receiver')&&!has('coordinator')?'/inbox':has('reviewer')&&!has('coordinator')&&!has('receiver')?'/reviews':has('coordinator')?'/board':'/inbox'}
 async function enter(){
   resetIdle();
+  if(S.me&&S.me.mustChange)await changePin(true);
   try{S.cfg=await api('GET','/api/config')}catch(e){}
   renderShell();
   if(!location.hash||location.hash==='#/'||location.hash==='#')location.hash=firstRoute();
@@ -105,15 +107,16 @@ async function enter(){
 }
 function renderShell(){
   const m=S.me;if(!m)return;
-  $('#who').innerHTML=`<div class="userchip"><div style="text-align:right"><b>${esc(m.name)}</b><small>${m.roles.includes('admin')?'admin':esc(m.roles.join(', '))}</small></div><div class="avatar">${esc((m.initials||'?').toUpperCase())}</div></div><button class="btn sm" id="logout" style="margin-left:6px">${ic('out')} Sign out</button>`;
+  $('#who').innerHTML=`<div class="userchip"><div style="text-align:right"><b>${esc(m.name)}</b><small>${m.roles.includes('admin')?'admin':esc(m.roles.join(', '))}</small></div><div class="avatar">${esc((m.initials||'?').toUpperCase())}</div></div>${m.kind==='pin'?'<button class="btn sm" id="chpin" style="margin-left:6px">Change PIN</button>':''}<button class="btn sm" id="logout" style="margin-left:6px">${ic('out')} Sign out</button>`;
   $('#logout').onclick=()=>logout();
+  const cp=$('#chpin');if(cp)cp.onclick=()=>changePin(false);
   $('.brand b').textContent=S.cfg.siteName||'Steel Receiving';
 }
 function tabsFor(){
   const t=[];
   if(has('receiver'))t.push(['inbox','inbox','My inbox']);
   if(has('reviewer'))t.push(['reviews','stamp','Reviews']);
-  if(has('coordinator')){t.push(['board','list','Packets']);t.push(['new','plus','New packet'])}
+  if(has('coordinator')){t.push(['board','list','Packets']);t.push(['new','plus','New packet']);t.push(['dashboard','chart','Dashboard'])}
   if(has('admin'))t.push(['settings','gear','Settings']);
   return t;
 }
@@ -133,6 +136,7 @@ async function route(){
   try{
     if(v==='settings'&&has('admin'))return viewSettings();
     if(v==='new'&&has('coordinator'))return viewNew();
+    if(v==='dashboard'&&has('coordinator'))return viewDashboard();
     await loadPackets();if(seq!==routeSeq)return;
     if(v==='p'&&parts[2]==='f')return viewForm(parts[1],parts[3],parts[4]);
     if(v==='p')return viewPacket(parts[1]);
@@ -147,3 +151,28 @@ setInterval(()=>{
   if(!S.me||document.hidden||$('#drawer').classList.contains('open')||document.querySelector('.pinwrap,.modal'))return;
   if(/^#\/(inbox|board|reviews)$/.test(location.hash)&&!document.activeElement?.matches('input,textarea'))route();
 },20000);
+
+/* ---- change PIN: three taps on the keypad (current, new, new again) ---- */
+function askPin(title,sub,cancelable){
+  return new Promise(resolve=>{
+    let v='';const L=S.cfg.pinLength,w=document.createElement('div');w.className='pinwrap';
+    w.innerHTML=`<div class="pinbox"><b style="font-size:19px;color:var(--dg)">${esc(title)}</b><div class="muted" style="font-size:13px;margin-top:4px">${esc(sub||'')}</div><div class="dots" id="dots"></div><div class="pinerr" id="perr"></div>
+     <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button data-k="${n}">${n}</button>`).join('')}<button class="sm" data-k="x">${cancelable?'Cancel':''}</button><button data-k="0">0</button><button class="sm" data-k="b">&#9003;</button></div></div>`;
+    document.body.appendChild(w);
+    const dots=()=>$('#dots').innerHTML=Array.from({length:L},(_,i)=>`<i class="${i<v.length?'f':''}"></i>`).join('');dots();
+    w.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{const k=b.dataset.k;
+      if(k==='x'){if(cancelable){w.remove();resolve(null)}return}
+      if(k==='b')v=v.slice(0,-1);else if(v.length<L)v+=k;dots();
+      if(v.length===L){w.remove();resolve(v)}});
+  });
+}
+async function changePin(force){
+  for(;;){
+    const cur=await askPin('Enter your current PIN',force?'An admin set this PIN for you. Choose your own now.':'',!force);if(cur===null)return;
+    const n1=await askPin('Choose a new PIN',S.cfg.pinLength+' digits',!force);if(n1===null)return;
+    const n2=await askPin('Type the new PIN again','',!force);if(n2===null)return;
+    if(n1!==n2){toast('The two PINs did not match. Try again.',1);continue}
+    try{S.me=await api('POST','/api/auth/change-pin',{current:cur,new:n1});toast('PIN changed');return}
+    catch(e){toast(e.message,1)}
+  }
+}

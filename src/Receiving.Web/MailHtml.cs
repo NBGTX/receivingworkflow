@@ -19,6 +19,7 @@ public static class MailHtml
         "inspection_complete" => new("Review needed", "In review", "#FDF1D8", "#A15C00", "Review packet"),
         "review_complete" => new("Ready to receive in D365", "Ready to receive", Pale, Med, "Open packet"),
         "received" => new("Ready to authorize", "Ready to authorize", Pale, Med, "Authorize packet"),
+        "reject" => new("Rejected item", "Reject", "#FBE4E4", "#A12626", "Open packet"),
         "filed" => new("Receiving complete", "Filed", Dark, "#FFFFFF", "View packet"),
         _ => new("Steel Receiving", "Notice", Pale, Dark, "Open Steel Receiving"),
     };
