@@ -463,7 +463,8 @@ ad.MapPost("/clear-packets", (ClaimsPrincipal u) =>
 ad.MapPost("/seed-demo", (ClaimsPrincipal u) =>
 {
     if (db.Query("SELECT 1 FROM packets", r => 1).Count > 0) return Results.BadRequest(new { error = "Packets already exist. Demo data only loads into an empty system." });
-    var demoDir = Path.GetFullPath(app.Configuration["DemoDir"] ?? @"..\..", app.Environment.ContentRootPath);
+    var samples = Path.Combine(app.Environment.ContentRootPath, "samples");
+    var demoDir = Directory.Exists(samples) ? samples : Path.GetFullPath(app.Configuration["DemoDir"] ?? @"..\..", app.Environment.ContentRootPath);
     long Ago(double h) => Now() - (long)(h * 3600000);
     long NewUser(string name, string ini, string role, string pin)
     {

@@ -14,6 +14,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- sample packets for the Load demo data button -->
+    <Content Include="..\..\*.pdf" Link="samples\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="data\**" />
     <Content Remove="data\**" />
     <None Remove="data\**" />
