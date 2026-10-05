@@ -114,9 +114,10 @@ function renderShell(){
 }
 function tabsFor(){
   const t=[];
-  if(has('receiver'))t.push(['inbox','inbox','My inbox']);
+  // intake first (overview, list, create), then the people who act on a packet, settings last
+  if(has('coordinator')){t.push(['dashboard','chart','Dashboard']);t.push(['board','list','Packets']);t.push(['new','plus','New packet'])}
   if(has('reviewer'))t.push(['reviews','stamp','Reviews']);
-  if(has('coordinator')){t.push(['board','list','Packets']);t.push(['new','plus','New packet']);t.push(['dashboard','chart','Dashboard'])}
+  if(has('receiver'))t.push(['inbox','inbox','My inbox']);
   if(has('admin'))t.push(['settings','gear','Settings']);
   return t;
 }
