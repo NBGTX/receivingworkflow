@@ -1,4 +1,4 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 <#
  Installs or updates the Steel Receiving app in IIS.
  Run on the web server in an elevated PowerShell:   .\Install-Receiving.ps1
@@ -30,7 +30,7 @@ $existing = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
 if (-not $existing) {
   $inUse = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
   if ($inUse) { Fail "Port $Port is already in use on this server. Pick another with -Port." }
-  $bound = Get-Website | Where-Object { ($_.Bindings.Collection | ForEach-Object { $_.bindingInformation }) -match ":$Port:" }
+  $bound = Get-Website | Where-Object { ($_.Bindings.Collection | ForEach-Object { $_.bindingInformation }) -match ":${Port}:" }
   if ($bound) { Fail "Port $Port is already bound by IIS site '$($bound.Name)'. Pick another with -Port." }
 }
 
@@ -87,3 +87,4 @@ try {
   exit 1
 }
 Write-Host "`nDone. Open http://$($env:COMPUTERNAME):$Port/ , sign in with Windows as an admin, then set Settings > General > Site address and the email server." -ForegroundColor Green
+

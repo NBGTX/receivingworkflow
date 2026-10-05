@@ -23,9 +23,10 @@ builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<Mailer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Mailer>());
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 100L * 1024 * 1024);
-builder.Services.Configure<IISServerOptions>(o => o.MaxRequestBodySize = 100L * 1024 * 1024);
+// IIS must not sign people in on its own: only our cookie counts, and Windows login runs only on /api/auth/windows.
+builder.Services.Configure<IISServerOptions>(o => { o.MaxRequestBodySize = 100L * 1024 * 1024; o.AutomaticAuthentication = false; });
 
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+builder.Services.AddAuthentication(o => { o.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme; o.DefaultAuthenticateScheme = CookieAuthenticationDefaults.AuthenticationScheme; o.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme; })
     .AddCookie(o =>
     {
         o.Cookie.Name = "nbs.auth"; o.Cookie.HttpOnly = true; o.Cookie.SameSite = SameSiteMode.Strict;
@@ -40,6 +41,9 @@ var app = builder.Build();
 var db = app.Services.GetRequiredService<Db>();
 var cfg = app.Services.GetRequiredService<SettingsStore>();
 var mail = app.Services.GetRequiredService<Mailer>();
+// In-process IIS has its own Windows login; Kestrel uses the Negotiate handler.
+var underIis = app.Services.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>().GetType().Name.Contains("IIS", StringComparison.OrdinalIgnoreCase)
+    || Environment.GetEnvironmentVariable("ASPNETCORE_IIS_HTTPAUTH") != null;
 
 // first admin
 if (db.Query("SELECT 1 FROM admins", r => 1).Count == 0)
@@ -93,8 +97,10 @@ api.MapPost("/auth/pin", async (HttpContext c, PinReq req) =>
 // Windows integrated sign-in (admins only). GET so the browser can complete the Negotiate handshake.
 api.MapGet("/auth/windows", async (HttpContext c) =>
 {
-    var winScheme = Environment.GetEnvironmentVariable("ASPNETCORE_IIS_HTTPAUTH") != null ? "Windows" : NegotiateDefaults.AuthenticationScheme;
-    var r = await c.AuthenticateAsync(winScheme);
+    var winScheme = underIis ? "Windows" : NegotiateDefaults.AuthenticationScheme;
+    AuthenticateResult r;
+    try { r = await c.AuthenticateAsync(winScheme); }
+    catch (Exception ex) { c.Response.StatusCode = 500; await c.Response.WriteAsJsonAsync(new { error = "Windows sign-in is not available here (" + winScheme + "): " + ex.Message }); return; }
     if (!r.Succeeded || r.Principal?.Identity?.Name is not { } acct) { await c.ChallengeAsync(winScheme); return; }
     var local = acct.Contains('\\') ? acct[(acct.IndexOf('\\') + 1)..] : acct;
     var row = db.One("SELECT account,name FROM admins WHERE account=$0 OR account=$1 OR (instr(account,'\\')=0 AND account=$1)",
@@ -540,7 +546,7 @@ app.Run();
 /* ---------------- helpers ---------------- */
 Me? GetMe(ClaimsPrincipal u)
 {
-    if (u.Identity?.IsAuthenticated != true) return null;
+    if (u.Identity?.IsAuthenticated != true || u.Identity.AuthenticationType != CookieAuthenticationDefaults.AuthenticationScheme) return null;   // ignore a raw Windows identity from IIS
     return new Me(u.FindFirstValue("kind") ?? "pin", u.FindFirstValue(ClaimTypes.NameIdentifier) ?? "", u.FindFirstValue(ClaimTypes.Name) ?? "", u.FindFirstValue("initials") ?? "",
         u.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray());
 }
