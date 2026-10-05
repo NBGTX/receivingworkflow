@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -151,6 +151,14 @@ pk.MapGet("/{id}/pdf", (string id) =>
 {
     var path = Path.Combine(dataDir, "pdfs", Path.GetFileName(id) + ".pdf");
     return File.Exists(path) ? Results.File(path, "application/pdf") : Results.NotFound();
+});
+
+pk.MapGet("/{id}/final.pdf", (string id, bool? inline) =>
+{
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    var orig = Path.Combine(dataDir, "pdfs", Path.GetFileName(id) + ".pdf");
+    var bytes = FinalPacket.Build(p.Bol, p.Stage, p.Data, File.Exists(orig) ? orig : null, cfg.General().SiteName);
+    return inline == true ? Results.File(bytes, "application/pdf") : Results.File(bytes, "application/pdf", $"BOL {p.Bol} final packet.pdf");
 });
 
 pk.MapGet("/{id}/csv", (string id) =>
@@ -376,6 +384,30 @@ ad.MapPost("/preview-email", (HttpContext c, JsonObject body) =>
     var (subject, _, html) = Compose(evt, n, d, "1929915", "review", "sample", GetMe(c.User)!.Name, Origin(c), true);
     return Results.Ok(new { subject, html });
 });
+int DeletePackets(string where)
+{
+    var ids = db.Query("SELECT id FROM packets WHERE " + where, r => r.GetString(0));
+    foreach (var id in ids)
+    {
+        var f = Path.Combine(dataDir, "pdfs", Path.GetFileName(id) + ".pdf"); if (File.Exists(f)) File.Delete(f);
+        db.Exec("DELETE FROM outbox WHERE packet_id=$0", id);
+        db.Exec("DELETE FROM packets WHERE id=$0", id);
+    }
+    return ids.Count;
+}
+ad.MapPost("/clear-demo", (ClaimsPrincipal u) =>
+{
+    var packets = DeletePackets("json_extract(data,'$.demo')=1");
+    var users = db.Exec("DELETE FROM users WHERE demo=1");
+    db.Audit(GetMe(u)!.Name, "clear_demo", $"packets={packets} users={users}");
+    return Results.Ok(new { packets, users });
+});
+ad.MapPost("/clear-packets", (ClaimsPrincipal u) =>
+{
+    var packets = DeletePackets("1=1");
+    db.Audit(GetMe(u)!.Name, "clear_all_packets", $"packets={packets}");
+    return Results.Ok(new { packets });
+});
 ad.MapPost("/seed-demo", (ClaimsPrincipal u) =>
 {
     if (db.Query("SELECT 1 FROM packets", r => 1).Count > 0) return Results.BadRequest(new { error = "Packets already exist. Demo data only loads into an empty system." });
@@ -386,16 +418,18 @@ ad.MapPost("/seed-demo", (ClaimsPrincipal u) =>
         var ex = db.Query("SELECT id FROM users WHERE name=$0", r => r.GetInt64(0), name);
         if (ex.Count > 0) return ex[0];
         var (h, s) = Pin.Make(pin);
-        return db.Insert("INSERT INTO users(name,initials,email,roles,pin_hash,pin_salt,active,created) VALUES($0,$1,'',$2,$3,$4,1,$5)", name, ini, role, h, s, Now());
+        return db.Insert("INSERT INTO users(name,initials,email,roles,pin_hash,pin_salt,active,created,demo) VALUES($0,$1,'',$2,$3,$4,1,$5,1)", name, ini, role, h, s, Now());
     }
     NewUser("Receiver One", "R1", "receiver", "1111"); NewUser("Receiver Two", "R2", "receiver", "2222");
     NewUser("Demo Coordinator", "DC", "coordinator", "3333"); var rev = NewUser("Demo Reviewer", "DR", "reviewer", "4444");
-    void Add(string bol, string vendor, string ship, string carrier, string pdf, string stage, double hrs, object rows, object forms, object[] log, object[] approvals, object[] required)
+    void Add(string bol, string vendor, string ship, string carrier, string pdf, string stage, double hrs, object rows, object forms, object[] log, object[] approvals, object[] required, string d365 = "", string authBy = "", double authHrs = 0)
     {
         var id = Guid.NewGuid().ToString("N")[..12];
         var src = Path.Combine(demoDir, pdf); var has = File.Exists(src);
         if (has) File.Copy(src, Path.Combine(dataDir, "pdfs", id + ".pdf"), true);
-        var d = JsonSerializer.SerializeToNode(new { vendor, ship, carrier, rows, forms, approvals, requiredReviewers = required, log, hasPdf = has })!;
+        var d = JsonSerializer.SerializeToNode(new { vendor, ship, carrier, rows, forms, approvals, requiredReviewers = required, log, hasPdf = has, demo = true })!.AsObject();
+        if (d365 != "") d["d365"] = d365;
+        if (authBy != "") { d["authBy"] = authBy; d["authAt"] = Ago(authHrs); }
         db.Exec("INSERT INTO packets(id,bol,stage,created,updated,data) VALUES($0,$1,$2,$3,$4,$5)", id, bol, stage, Ago(hrs), Ago(hrs), d.ToJsonString());
     }
     object L(double h, string who, string what) => new { t = Ago(h), who, what };
@@ -431,8 +465,46 @@ ad.MapPost("/seed-demo", (ClaimsPrincipal u) =>
         new[] { L(30, "Demo Coordinator", "Packet indexed, task created for receivers"), L(27, "R1", "Submitted Rod/pipe/tube inspection for TX-0016400"), L(26, "R1", "Submitted Beam/channel/angle inspection for TX-0016400"), L(26, "Receiver One", "Inspection complete") },
         Array.Empty<object>(), new object[] { new { id = rev.ToString(), name = "Demo Reviewer" } });
 
+
+    // ---- built-in packets (no scanned PDF): every inspection sheet type, filled in by the app ----
+    var rv = new object[] { new { id = rev.ToString(), name = "Demo Reviewer" } };
+    object Ap(double h) => new { id = rev.ToString(), n = "Demo Reviewer", t = Ago(h) };
+
+    // Filed: coil + flat sheet + flat bar across two POs
+    var steel = new List<object>();
+    for (int i = 0; i < 3; i++) steel.Add(Row("TX-0017001", i < 2 ? "H90112" : "H90113", "2209001." + (i + 1) + "000", "16210" + (i + 1), ".0940 x 14.0600 HRO", "13,406", "2833"));
+    for (int i = 0; i < 4; i++) steel.Add(Row("TX-0017002", "S4400" + (i / 2 + 1), "", "16211" + i, "16 GA G60 x 48 x 120 sheet", "1,150", "120\""));
+    for (int i = 0; i < 3; i++) steel.Add(Row("TX-0017002", "B3310" + (i + 1), "", "16212" + i, "3/8 x 6 flat bar x 20'", "382", "20' 0\""));
+    object Coil(int i) => new { id = "20", od = i == 2 ? "61 3/4" : "62", gauge = ".094", width = "14.0625", color = "Black", comments = i == 1 ? "Light oil film, wiped" : "" };
+    object Sheet() => new { qty = "25", len = "120", width = "48", gauge = "16", comments = "" };
+    object Bar(int i) => new { qty = "20", width = "6", thick = ".375", sweep = i == 2 ? ".3125" : ".25", surface = "ok", cert = "ok", comments = "" };
+    Add("7700123", "Demo Steel Supply", "09/28/26", "Demo Freight Lines", "", "filed", 80, steel,
+        new Dictionary<string, object>
+        {
+            ["TX-0017001|coil"] = F("Receiver One", "R1", "2026-09-29", It(steel[0], Coil(0), 0), It(steel[1], Coil(1), 1), It(steel[2], Coil(2), 2)),
+            ["TX-0017002|sheet"] = F("Receiver Two", "R2", "2026-09-29", It(steel[3], Sheet(), 0), It(steel[4], Sheet(), 1), It(steel[5], Sheet(), 2), It(steel[6], Sheet(), 3)),
+            ["TX-0017002|bar"] = F("Receiver Two", "R2", "2026-09-29", It(steel[7], Bar(0), 4), It(steel[8], Bar(1), 5), It(steel[9], Bar(2), 6)),
+        },
+        new[] { L(80, "Demo Coordinator", "Packet indexed, task created for receivers"), L(76, "R1", "Submitted Coil inspection for TX-0017001"), L(75, "R2", "Submitted Flat sheet inspection for TX-0017002"), L(75, "R2", "Submitted Flat bar inspection for TX-0017002"), L(74, "Receiver Two", "Inspection complete"), L(70, "Demo Reviewer", "Approved"), L(70, "System", "Review complete"), L(66, "Demo Coordinator", "Received in D365 (PR-100311)"), L(64, "Demo Coordinator", "Authorized, filed") },
+        new[] { Ap(70) }, rv, "PR-100311", "Demo Coordinator", 64);
+
+    // Ready to authorize: tube (one reject) + beam
+    var pipe = new List<object>();
+    for (int i = 0; i < 3; i++) pipe.Add(Row("TX-0017101", "T700" + (i + 1), "", "16220" + i, "Tubing 6 x 6 x 3/8 x 24'", "660", "24' 0\""));
+    for (int i = 0; i < 2; i++) pipe.Add(Row("TX-0017101", "W551" + (i + 1), "", "16221" + i, "Beam W10x22 x 40'", "880", "40' 0\""));
+    object Tube(int i) => new { qty = "1", wall = ".351", od = "6 x 6", surface = i == 1 ? "bad" : "ok", sweep = ".125", cert = "ok", comments = i == 1 ? "Scratch near end, vendor notified" : "" };
+    object Beam(int i) => new { qty = "1", depth = "10", width = "5 3/4", visual = "ok", thick = ".240", sweep = ".375", cert = "ok", comments = "" };
+    Add("7700456", "Demo Pipe and Tube", "10/01/26", "Demo Freight Lines", "", "authorize", 20, pipe,
+        new Dictionary<string, object>
+        {
+            ["TX-0017101|tube"] = F("Receiver One", "R1", "2026-10-02", It(pipe[0], Tube(0), 0), It(pipe[1], Tube(1), 1), It(pipe[2], Tube(2), 2)),
+            ["TX-0017101|shape"] = F("Receiver One", "R1", "2026-10-02", It(pipe[3], Beam(0), 3), It(pipe[4], Beam(1), 4)),
+        },
+        new[] { L(20, "Demo Coordinator", "Packet indexed, task created for receivers"), L(17, "R1", "Submitted Pipe, rod and tube inspection for TX-0017101"), L(17, "R1", "Submitted Beam/channel/angle inspection for TX-0017101"), L(16, "Receiver One", "Inspection complete"), L(12, "Demo Reviewer", "Approved"), L(12, "System", "Review complete"), L(8, "Demo Coordinator", "Received in D365 (PR-100500)") },
+        new[] { Ap(12) }, rv, "PR-100500");
+
     db.Audit(GetMe(u)!.Name, "seed_demo");
-    return Results.Ok(new { users = "Receiver One 1111, Receiver Two 2222, Demo Coordinator 3333, Demo Reviewer 4444", packets = 3 });
+    return Results.Ok(new { users = "Receiver One 1111, Receiver Two 2222, Demo Coordinator 3333, Demo Reviewer 4444", packets = 5 });
 });
 ad.MapGet("/outbox", () => db.Query("SELECT id,to_addr,subject,event,status,attempts,error,created,sent_at FROM outbox ORDER BY id DESC LIMIT 100",
     r => new { id = r.GetInt64(0), to = r.GetString(1), subject = r.GetString(2), evt = r.IsDBNull(3) ? "" : r.GetString(3), status = r.GetString(4), attempts = r.GetInt32(5), error = r.IsDBNull(6) ? "" : r.GetString(6), created = r.GetInt64(7), sentAt = r.IsDBNull(8) ? 0 : r.GetInt64(8) }));
@@ -547,3 +619,4 @@ class PacketRec(Db db, string id, string bol, string stage, long created, JsonOb
         o["id"] = Id; o["bol"] = Bol; o["stage"] = Stage; o["created"] = Created; return o;
     }
 }
+

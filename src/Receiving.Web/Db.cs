@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGE
     public void Migrate()
     {
         try { Exec("ALTER TABLE outbox ADD COLUMN html TEXT"); } catch { /* already there */ }
+        try { Exec("ALTER TABLE users ADD COLUMN demo INTEGER NOT NULL DEFAULT 0"); } catch { /* already there */ }
+        // demo data loaded before the demo flag existed
+        Exec("UPDATE users SET demo=1 WHERE demo=0 AND name IN ('Receiver One','Receiver Two','Demo Coordinator','Demo Reviewer')");
+        Exec("UPDATE packets SET data=json_set(data,'$.demo',json('true')) WHERE bol IN ('1487848','1929915','327874') AND json_extract(data,'$.demo') IS NULL");
     }
 
     SqliteConnection Open()

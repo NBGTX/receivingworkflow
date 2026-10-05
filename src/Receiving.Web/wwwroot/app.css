@@ -318,3 +318,6 @@ table.cells th{font-size:10px;letter-spacing:.2px}
 .rvbox>label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute);margin-bottom:6px}
 .rv{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #eeece6;font-weight:bold;color:var(--dg)}
 .rv:last-of-type{border-bottom:0}
+
+.btn.danger{border-color:var(--red);color:var(--red);background:#fff}
+.btn.danger:hover{background:var(--redbg)}

@@ -60,6 +60,7 @@ function viewPacket(id){
   <button class="crumb" id="back">${ic('back')} ${back[1]}</button>
   <div class="pagehead"><div class="grow"><h1>BOL ${esc(p.bol)}</h1><p>${esc(p.vendor)} &middot; ${esc(p.carrier||'')} &middot; shipped ${esc(p.ship||'')}</p></div>
    <span class="chip ${p.stage}" style="font-size:14px;padding:6px 14px">${SL[p.stage]}</span>
+   ${has('coordinator')&&p.stage!=='filed'?`<a class="btn" href="/api/packets/${p.id}/final.pdf?inline=1" target="_blank">${ic('file')} Preview final packet</a>`:''}
    ${p.hasPdf?`<button class="btn" id="viewpdf">${ic('file')} View packet PDF</button>`:''}</div>
   <div class="card" style="margin-bottom:18px"><div class="steps">${STAGES.map(([k,l],i)=>`<div class="step ${i<si?'done':i===si?'cur':''}"><i></i>${l}</div>`).join('')}</div></div>
   <div class="grid2"><div>
@@ -97,7 +98,7 @@ function stageAction(p){
   if(!has('coordinator'))return p.stage==='filed'?'':'';
   if(p.stage==='receive')return `<div class="action"><h3>Receive in D365</h3><p class="muted" style="margin:0 0 10px">Receive the PO lines in D365, then record the receipt number.</p><div class="fld" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap"><div style="flex:1;min-width:200px"><label>D365 receipt #</label><input id="d365" placeholder="PR-000000"></div><button class="btn pri" id="recv" style="min-height:52px">Mark received</button></div></div>`;
   if(p.stage==='authorize')return `<div class="action"><h3>Authorize</h3><p class="muted" style="margin:0 0 10px">D365 receipt ${esc(p.d365)}. Authorizing files the packet and sends the final notification.</p><button class="btn pri big" id="auth">${ic('check')} Authorize and file</button></div>`;
-  if(p.stage==='filed')return `<div class="action"><h3>Filed</h3><p class="muted" style="margin:0 0 10px">Authorized by ${esc(p.authBy||'')} ${p.authAt?fdate(p.authAt):''}. Upload the PDF to DocuWare and tag it with this index sheet.</p><a class="btn dark" href="/api/packets/${p.id}/csv">${ic('dl')} Download DocuWare index (CSV)</a> ${p.hasPdf?`<a class="btn" href="/api/packets/${p.id}/pdf" download="BOL ${esc(p.bol)}.pdf">${ic('dl')} Packet PDF</a>`:''}</div>`;
+  if(p.stage==='filed')return `<div class="action"><h3>Filed</h3><p class="muted" style="margin:0 0 10px">Authorized by ${esc(p.authBy||'')} ${p.authAt?fdate(p.authAt):''}. Upload the final packet PDF to DocuWare. Its cover sheet holds every index field as typed text.</p><a class="btn dark" href="/api/packets/${p.id}/final.pdf">${ic('dl')} Download final packet (PDF)</a> <a class="btn" href="/api/packets/${p.id}/csv">${ic('dl')} Index data (CSV)</a> ${p.hasPdf?`<a class="btn" href="/api/packets/${p.id}/pdf" download="BOL ${esc(p.bol)}.pdf">${ic('dl')} Packet PDF</a>`:''}</div>`;
   return '';
 }
 

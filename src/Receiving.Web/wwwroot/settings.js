@@ -120,7 +120,17 @@ function tabGeneral(){
    ${fld('Lock minutes',inp('gl',g.lockMinutes,'type="number" min="1"'))}
    ${fld('Reviews needed',`<select id="gr"><option value="all" ${g.reviewRule==='all'?'selected':''}>Every reviewer must approve</option><option value="any" ${g.reviewRule==='any'?'selected':''}>Any one reviewer is enough</option></select>`)}</div>
    <p class="hint">Changing PIN length only affects PINs set after the change. Existing PINs keep working until reset.</p></div>
-   <div class="card" style="margin-top:16px"><h2>Demo data</h2><p class="hint" style="margin:0 0 10px">Loads three real sample packets (Arkansas coils, Berkeley beams, Delta tube and beams) with their PDFs, plus four demo users. Only works while there are no packets.</p><button class="btn" id="seed">Load demo data</button> <span id="seedmsg" class="muted"></span></div>${saveBar()}`;
+   <div class="card" style="margin-top:16px"><h2>Demo data</h2><p class="hint" style="margin:0 0 12px">Load five sample packets: three from your real scanned PDFs (Arkansas coils, Berkeley beams, Delta tube and beams) and two built-in ones that use every inspection sheet type (coil, flat sheet, flat bar, beam, tube). Also adds four demo users (Receiver One, Receiver Two, Demo Coordinator, Demo Reviewer). Loading only works while there are no packets.</p>
+   <div class="bar" style="margin:0"><button class="btn" id="seed">Load demo data</button><button class="btn" id="clrdemo">Clear demo data</button><button class="btn danger" id="clrall">Delete ALL packets</button></div>
+   <p class="hint" style="margin:10px 0 0"><b>Clear demo data</b> removes only the sample packets and demo users. <b>Delete ALL packets</b> removes every packet, including ones you made, and cannot be undone. Users and settings are kept.</p><p id="seedmsg" class="muted" style="margin:8px 0 0"></p></div>${saveBar()}`;
+  const demoCall=async(path,label,confirmText)=>{
+    if(confirmText&&!confirm(confirmText))return;
+    const m=$('#seedmsg');m.className='muted';m.textContent=label+'...';
+    try{const r=await api('POST','/api/admin/'+path,{});SUsers=await api('GET','/api/admin/users');
+      m.textContent=path==='seed-demo'?'Loaded. PINs: '+r.users:path==='clear-demo'?'Cleared '+r.packets+' demo packets and '+r.users+' demo users.':'Deleted '+r.packets+' packets.'}
+    catch(e){m.className='err';m.textContent=e.message}};
+  $('#clrdemo').onclick=()=>demoCall('clear-demo','Clearing','Remove the sample packets and demo users?');
+  $('#clrall').onclick=()=>demoCall('clear-packets','Deleting','Delete ALL packets, including ones you created? This cannot be undone.');
   $('#seed').onclick=async()=>{const m=$('#seedmsg');m.className='muted';m.textContent='Loading...';try{const r=await api('POST','/api/admin/seed-demo',{});m.textContent='Loaded. PINs: '+r.users;SUsers=await api('GET','/api/admin/users')}catch(e){m.className='err';m.textContent=e.message}};
   [['gn','siteName'],['gb','baseUrl'],['gr','reviewRule']].forEach(([i,k])=>bind(i,g,k));[['gi','idleMinutes'],['gp','pinLength'],['gm','maxFailed'],['gl','lockMinutes']].forEach(([i,k])=>bind(i,g,k,true));
   const here=location.origin,gh=$('#gbh');
