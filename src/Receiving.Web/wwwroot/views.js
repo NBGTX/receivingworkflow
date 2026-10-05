@@ -43,7 +43,7 @@ function viewBoard(){
   ${rows.length?rows.map(p=>{const n=pos(p).length,c=covered(p),hot=p.stage!=='filed'&&Date.now()-lastT(p)>24*3600e3;
    return `<tr class="r" data-id="${p.id}"><td class="b">${esc(p.bol)}</td><td>${esc(p.vendor)}</td><td>${pos(p).map(x=>`<span class="chip po">${esc(x)}</span>`).join(' ')}</td><td class="mono">${p.rows.length}</td>
    <td><span class="mini"><span class="prog"><div style="width:${n?c/n*100:0}%"></div></span><span class="mono muted">${c}/${n}</span></span></td>
-   <td><span class="chip ${p.stage}">${SL[p.stage]}</span></td><td class="age ${hot?'hot':''}">${ago(lastT(p))}</td></tr>`}).join(''):`<tr><td colspan="7" class="empty">No packets match.</td></tr>`}
+   <td>${p.ready===false?'<span class="chip pend">Draft, no PDF yet</span>':`<span class="chip ${p.stage}">${SL[p.stage]}</span>`}</td><td class="age ${hot?'hot':''}">${ago(lastT(p))}</td></tr>`}).join(''):`<tr><td colspan="7" class="empty">No packets match.</td></tr>`}
   </tbody></table>`;
   $$('[data-s]').forEach(b=>b.onclick=()=>{boardF=b.dataset.s===boardF?'all':b.dataset.s;viewBoard()});
   $('#q').oninput=e=>{boardQ=e.target.value;const at=e.target.selectionStart;viewBoard();const q=$('#q');q.focus();q.setSelectionRange(at,at)};

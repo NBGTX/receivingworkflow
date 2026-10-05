@@ -7,3 +7,6 @@ obj/
 # runtime data: database, uploaded packet PDFs, encryption keys, saved SMTP password
 src/Receiving.Web/data/
 
+
+# deployment package output
+/deploy/

@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -12,6 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 var dataDir = Path.GetFullPath(builder.Configuration["DataDir"] ?? "data", builder.Environment.ContentRootPath);
 Directory.CreateDirectory(Path.Combine(dataDir, "pdfs"));
 Directory.CreateDirectory(Path.Combine(dataDir, "keys"));
+Directory.CreateDirectory(Path.Combine(dataDir, "final"));
 
 var dp = builder.Services.AddDataProtection().SetApplicationName("NBS.Receiving")
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(dataDir, "keys")));
@@ -22,6 +23,7 @@ builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<Mailer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Mailer>());
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 100L * 1024 * 1024);
+builder.Services.Configure<IISServerOptions>(o => o.MaxRequestBodySize = 100L * 1024 * 1024);
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
@@ -91,8 +93,9 @@ api.MapPost("/auth/pin", async (HttpContext c, PinReq req) =>
 // Windows integrated sign-in (admins only). GET so the browser can complete the Negotiate handshake.
 api.MapGet("/auth/windows", async (HttpContext c) =>
 {
-    var r = await c.AuthenticateAsync(NegotiateDefaults.AuthenticationScheme);
-    if (!r.Succeeded || r.Principal?.Identity?.Name is not { } acct) { await c.ChallengeAsync(NegotiateDefaults.AuthenticationScheme); return; }
+    var winScheme = Environment.GetEnvironmentVariable("ASPNETCORE_IIS_HTTPAUTH") != null ? "Windows" : NegotiateDefaults.AuthenticationScheme;
+    var r = await c.AuthenticateAsync(winScheme);
+    if (!r.Succeeded || r.Principal?.Identity?.Name is not { } acct) { await c.ChallengeAsync(winScheme); return; }
     var local = acct.Contains('\\') ? acct[(acct.IndexOf('\\') + 1)..] : acct;
     var row = db.One("SELECT account,name FROM admins WHERE account=$0 OR account=$1 OR (instr(account,'\\')=0 AND account=$1)",
         x => new { Acct = x.GetString(0), Name = x.GetString(1) }, acct, local);
@@ -108,14 +111,16 @@ api.MapPost("/auth/logout", async (HttpContext c) => { await c.SignOutAsync(); r
 /* ---------------- packets ---------------- */
 var pk = api.MapGroup("/packets").RequireAuthorization();
 
-pk.MapGet("", (bool? all) =>
+static bool IsDraft(JsonNode? n) => n?["ready"] is JsonValue v && v.TryGetValue<bool>(out var b) && !b;
+
+pk.MapGet("", (ClaimsPrincipal u, bool? all) =>
 {
-    var cutoff = Now() - 60L * 86400000;
+    var cutoff = Now() - 60L * 86400000; var seeAll = GetMe(u)!.Has("coordinator");
     var rows = db.Query("SELECT id,bol,stage,created,updated,data FROM packets ORDER BY created DESC", r => PacketJson(r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt64(3), r.GetInt64(4), r.GetString(5)));
-    return rows.Where(p => all == true || p["stage"]!.GetValue<string>() != "filed" || p["updated"]!.GetValue<long>() > cutoff);
+    return rows.Where(p => (seeAll || !IsDraft(p)) && (all == true || p["stage"]!.GetValue<string>() != "filed" || p["updated"]!.GetValue<long>() > cutoff));
 });
 
-pk.MapGet("/{id}", (string id) => LoadPacket(id) is { } p ? Results.Ok(p.ToJson()) : Results.NotFound());
+pk.MapGet("/{id}", (string id, ClaimsPrincipal u) => LoadPacket(id) is { } p && (GetMe(u)!.Has("coordinator") || !IsDraft(p.Data)) ? Results.Ok(p.ToJson()) : Results.NotFound());
 
 pk.MapPost("", (ClaimsPrincipal u, HttpContext c, JsonObject body) =>
 {
@@ -127,14 +132,13 @@ pk.MapPost("", (ClaimsPrincipal u, HttpContext c, JsonObject body) =>
     var data = new JsonObject
     {
         ["vendor"] = Str(body, "vendor"), ["ship"] = Str(body, "ship"), ["carrier"] = Str(body, "carrier"),
-        ["rows"] = JsonNode.Parse(rows.ToJsonString()), ["forms"] = new JsonObject(), ["approvals"] = new JsonArray(), ["log"] = new JsonArray(), ["hasPdf"] = false
+        ["rows"] = JsonNode.Parse(rows.ToJsonString()), ["forms"] = new JsonObject(), ["approvals"] = new JsonArray(), ["log"] = new JsonArray(), ["hasPdf"] = false, ["ready"] = false
     };
-    AddLog(data, me.Name, "Packet indexed, task created for receivers");
+    AddLog(data, me.Name, "Packet indexed");
     db.Exec("INSERT INTO packets(id,bol,stage,created,updated,data) VALUES($0,$1,'new',$2,$2,$3)", id, bol, Now(), data.ToJsonString());
     var pkt = LoadPacket(id)!;
-    Notify("packet_created", pkt, me.Name, Origin(c));
     db.Audit(me.Name, "packet_create", bol);
-    return Results.Ok(pkt.ToJson());
+    return Results.Ok(pkt.ToJson());   // stays a draft until the PDF is attached, then receivers are notified
 });
 
 pk.MapPost("/{id}/pdf", async (string id, ClaimsPrincipal u, HttpContext c) =>
@@ -143,7 +147,11 @@ pk.MapPost("/{id}/pdf", async (string id, ClaimsPrincipal u, HttpContext c) =>
     var p = LoadPacket(id); if (p == null) return Results.NotFound();
     var path = Path.Combine(dataDir, "pdfs", id + ".pdf");
     await using (var fs = File.Create(path)) await c.Request.Body.CopyToAsync(fs);
-    p.Data["hasPdf"] = true; p.Save();
+    var first = IsDraft(p.Data);
+    p.Data["hasPdf"] = true; p.Data["ready"] = true;
+    if (first) AddLog(p.Data, me.Name, "PDF attached, sent to receivers");
+    p.Save();
+    if (first) Notify("packet_created", p, me.Name, Origin(c));
     return Results.Ok();
 });
 
@@ -153,11 +161,24 @@ pk.MapGet("/{id}/pdf", (string id) =>
     return File.Exists(path) ? Results.File(path, "application/pdf") : Results.NotFound();
 });
 
-pk.MapGet("/{id}/final.pdf", (string id, bool? inline) =>
+string FinalPath(string id) => Path.Combine(dataDir, "final", Path.GetFileName(id) + ".pdf");
+byte[] BuildFinal(PacketRec p)
 {
-    var p = LoadPacket(id); if (p == null) return Results.NotFound();
-    var orig = Path.Combine(dataDir, "pdfs", Path.GetFileName(id) + ".pdf");
-    var bytes = FinalPacket.Build(p.Bol, p.Stage, p.Data, File.Exists(orig) ? orig : null, cfg.General().SiteName);
+    var orig = Path.Combine(dataDir, "pdfs", Path.GetFileName(p.Id) + ".pdf");
+    return FinalPacket.Build(p.Bol, p.Stage, p.Data, File.Exists(orig) ? orig : null, cfg.General().SiteName);
+}
+void StoreFinal(PacketRec p) { try { File.WriteAllBytes(FinalPath(p.Id), BuildFinal(p)); } catch (Exception ex) { app.Logger.LogError(ex, "Could not store final packet for {Bol}", p.Bol); } }
+
+pk.MapGet("/{id}/final.pdf", (string id, bool? inline, ClaimsPrincipal u) =>
+{
+    var p = LoadPacket(id); if (p == null || (IsDraft(p.Data) && !GetMe(u)!.Has("coordinator"))) return Results.NotFound();
+    byte[] bytes;
+    if (p.Stage == "filed")
+    {
+        if (!File.Exists(FinalPath(id))) StoreFinal(p);      // filed before storing existed
+        bytes = File.Exists(FinalPath(id)) ? File.ReadAllBytes(FinalPath(id)) : BuildFinal(p);
+    }
+    else bytes = BuildFinal(p);                               // preview only, not stored
     return inline == true ? Results.File(bytes, "application/pdf") : Results.File(bytes, "application/pdf", $"BOL {p.Bol} final packet.pdf");
 });
 
@@ -250,6 +271,7 @@ pk.MapPost("/{id}/authorize", (string id, ClaimsPrincipal u, HttpContext c) =>
     var p = LoadPacket(id); if (p == null) return Results.NotFound();
     if (p.Stage != "authorize") return Results.Conflict(new { error = "Not ready to authorize." });
     p.Data["authBy"] = me.Name; p.Data["authAt"] = Now(); p.Stage = "filed"; AddLog(p.Data, me.Name, "Authorized, filed"); p.Save();
+    StoreFinal(p);
     Notify("filed", p, me.Name, Origin(c));
     db.Audit(me.Name, "authorize", p.Bol);
     return Results.Ok(p.ToJson());
@@ -390,6 +412,7 @@ int DeletePackets(string where)
     foreach (var id in ids)
     {
         var f = Path.Combine(dataDir, "pdfs", Path.GetFileName(id) + ".pdf"); if (File.Exists(f)) File.Delete(f);
+        var ff = Path.Combine(dataDir, "final", Path.GetFileName(id) + ".pdf"); if (File.Exists(ff)) File.Delete(ff);
         db.Exec("DELETE FROM outbox WHERE packet_id=$0", id);
         db.Exec("DELETE FROM packets WHERE id=$0", id);
     }
