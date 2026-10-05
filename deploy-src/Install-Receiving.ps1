@@ -1,4 +1,4 @@
-﻿#Requires -RunAsAdministrator
+#Requires -RunAsAdministrator
 <#
  Installs or updates the Steel Receiving app in IIS.
  Run on the web server in an elevated PowerShell:   .\Install-Receiving.ps1
@@ -50,6 +50,7 @@ Step "App pool and site"
 if (-not (Test-Path "IIS:\AppPools\$pool")) { New-WebAppPool $pool | Out-Null }
 Set-ItemProperty "IIS:\AppPools\$pool" managedRuntimeVersion ''
 Set-ItemProperty "IIS:\AppPools\$pool" startMode 'AlwaysRunning'
+Set-ItemProperty "IIS:\AppPools\$pool" processModel.loadUserProfile $true
 Set-ItemProperty "IIS:\AppPools\$pool" processModel.idleTimeout ([TimeSpan]::Zero)
 if (-not $existing) { New-Website -Name $SiteName -PhysicalPath $AppPath -ApplicationPool $pool -Port $Port | Out-Null }
 else { Set-ItemProperty "IIS:\Sites\$SiteName" physicalPath $AppPath; Set-ItemProperty "IIS:\Sites\$SiteName" applicationPool $pool }

@@ -16,7 +16,7 @@ Directory.CreateDirectory(Path.Combine(dataDir, "final"));
 
 var dp = builder.Services.AddDataProtection().SetApplicationName("NBS.Receiving")
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(dataDir, "keys")));
-if (OperatingSystem.IsWindows()) dp.ProtectKeysWithDpapi();
+if (OperatingSystem.IsWindows()) dp.ProtectKeysWithDpapi(protectToLocalMachine: true);   // machine scope: IIS app pool identities have no user profile
 
 builder.Services.AddSingleton(new Db(Path.Combine(dataDir, "receiving.db")));
 builder.Services.AddSingleton<SettingsStore>();
