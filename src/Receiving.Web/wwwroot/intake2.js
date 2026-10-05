@@ -92,17 +92,17 @@ async function scanPage(){
 
 function showSuggestions(){
   const box=$('#sug');if(!box||!SUG)return;
-  const chip=(label,val,field)=>val?`<button class="chip sg" data-f="${field}" data-v="${esc(val)}">${esc(label)} <b>${esc(val)}</b></button>`:'';
+  const chip=(label,val,field)=>val?`<button class="chip sg" data-sgf="${field}" data-sgv="${esc(val)}">${esc(label)} <b>${esc(val)}</b></button>`:'';
   const hit=layoutList.find(l=>SUG.text.toLowerCase().includes(l.name.toLowerCase()));
   box.innerHTML=`<div class="sug"><div class="sgh">Suggestions from the page <span class="muted">(check each one)</span> <button class="btn sm" id="rescan">Read this page</button></div>
-   <div class="sgc">${chip('BOL #',SUG.bol,'bol')}${chip('Vendor',SUG.vendor,'vendor')}${chip('Ship date',SUG.ship,'ship')}${chip('Carrier',SUG.carrier,'carrier')}${SUG.pos.map(p=>`<button class="chip sg" data-f="po" data-v="${esc(p)}">PO <b>${esc(p)}</b></button>`).join('')}</div>
+   <div class="sgc">${chip('BOL #',SUG.bol,'bol')}${chip('Vendor',SUG.vendor,'vendor')}${chip('Ship date',SUG.ship,'ship')}${chip('Carrier',SUG.carrier,'carrier')}${SUG.pos.map(p=>`<button class="chip sg" data-sgf="po" data-sgv="${esc(p)}">PO <b>${esc(p)}</b></button>`).join('')}</div>
    <div class="bar" style="margin:8px 0 0">${SUG.rows.length?`<button class="btn sm pri" id="sgrows">${$$('#rows tr').some(tr=>$$('input',tr).some(i=>i.value))?'Add':'Fill'} ${SUG.rows.length} row${SUG.rows.length===1?'':'s'} from the page</button>`:'<span class="muted">No item rows recognized on this page.</span>'}
    <button class="btn sm" id="sgheat">Check heats against the MTR pages</button>
    ${hit?`<button class="btn sm" id="sglay">Use saved layout: ${esc(hit.name)}</button>`:''}</div>${SUG.fixed?`<div class="muted" style="margin-top:6px">${SUG.fixed} value${SUG.fixed===1?'':'s'} corrected using fixes you made on earlier packets from this vendor.</div>`:''}<div id="heatres">${HEATRES}</div></div>`;
   $$('.sg',box).forEach(b=>b.onclick=()=>{
-    const f=b.dataset.f,v=b.dataset.v;
+    const f=b.dataset.sgf,v=b.dataset.sgv;
     if(f==='po'){const el=($$('#rows [data-f=po]').find(i=>!i.value)||addRow().querySelector('[data-f=po]'));el.value=v;setActive(el.closest('tr').querySelector('[data-f=heat]'))}
-    else{const el=$(`[data-f=${f}]`);el.value=v;setActive(el)}
+    else{const el=$(`input[data-f=${f}]`);el.value=v;setActive(el)}
   });
   $('#rescan').onclick=scanPage;
   $('#sgheat').onclick=checkHeats;
