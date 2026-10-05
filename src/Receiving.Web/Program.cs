@@ -1,0 +1,549 @@
+using System.Security.Claims;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.Negotiate;
+using Microsoft.AspNetCore.DataProtection;
+using Receiving.Web;
+
+var builder = WebApplication.CreateBuilder(args);
+var dataDir = Path.GetFullPath(builder.Configuration["DataDir"] ?? "data", builder.Environment.ContentRootPath);
+Directory.CreateDirectory(Path.Combine(dataDir, "pdfs"));
+Directory.CreateDirectory(Path.Combine(dataDir, "keys"));
+
+var dp = builder.Services.AddDataProtection().SetApplicationName("NBS.Receiving")
+    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(dataDir, "keys")));
+if (OperatingSystem.IsWindows()) dp.ProtectKeysWithDpapi();
+
+builder.Services.AddSingleton(new Db(Path.Combine(dataDir, "receiving.db")));
+builder.Services.AddSingleton<SettingsStore>();
+builder.Services.AddSingleton<Mailer>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Mailer>());
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 100L * 1024 * 1024);
+
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(o =>
+    {
+        o.Cookie.Name = "nbs.auth"; o.Cookie.HttpOnly = true; o.Cookie.SameSite = SameSiteMode.Strict;
+        o.ExpireTimeSpan = TimeSpan.FromHours(12);
+        o.Events.OnRedirectToLogin = c => { c.Response.StatusCode = 401; return Task.CompletedTask; };
+        o.Events.OnRedirectToAccessDenied = c => { c.Response.StatusCode = 403; return Task.CompletedTask; };
+    })
+    .AddNegotiate();
+builder.Services.AddAuthorization(o => o.AddPolicy("Admin", p => p.RequireRole("admin")));
+
+var app = builder.Build();
+var db = app.Services.GetRequiredService<Db>();
+var cfg = app.Services.GetRequiredService<SettingsStore>();
+var mail = app.Services.GetRequiredService<Mailer>();
+
+// first admin
+if (db.Query("SELECT 1 FROM admins", r => 1).Count == 0)
+    db.Exec("INSERT INTO admins(account,name,added_by,added_at) VALUES($0,$1,$2,$3)", @"BG\sims.anderson", "Sims Anderson", "system", Now());
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
+app.Use(async (c, next) =>
+{
+    if (c.Request.Path.StartsWithSegments("/api") && !HttpMethods.IsGet(c.Request.Method) && !HttpMethods.IsHead(c.Request.Method)
+        && c.Request.Headers["X-Requested-With"] != "fetch")
+    { c.Response.StatusCode = 400; await c.Response.WriteAsJsonAsync(new { error = "Bad request" }); return; }
+    await next();
+});
+app.UseAuthentication();
+app.UseAuthorization();
+
+static long Now() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+string[] AllRoles = ["receiver", "coordinator", "reviewer"];
+var api = app.MapGroup("/api");
+
+/* ---------------- config + auth ---------------- */
+api.MapGet("/config", () => { var g = cfg.General(); return new { g.SiteName, g.IdleMinutes, g.PinLength }; });
+
+api.MapGet("/auth/cards", () => db.Query("SELECT id,name,initials,roles FROM users WHERE active=1 AND pin_hash IS NOT NULL ORDER BY name",
+    r => new { id = r.GetInt64(0), name = r.GetString(1), initials = r.GetString(2), roles = r.GetString(3).Split(',', StringSplitOptions.RemoveEmptyEntries) }));
+
+api.MapGet("/auth/me", (ClaimsPrincipal u) => GetMe(u) is { } m ? Results.Ok(MeJson(m)) : Results.Unauthorized());
+
+api.MapPost("/auth/pin", async (HttpContext c, PinReq req) =>
+{
+    var g = cfg.General();
+    var u = db.One("SELECT id,name,initials,roles,pin_hash,pin_salt,active,failed,locked_until FROM users WHERE id=$0",
+        r => new { Id = r.GetInt64(0), Name = r.GetString(1), Ini = r.GetString(2), Roles = r.GetString(3), H = r.IsDBNull(4) ? null : r.GetString(4), S = r.IsDBNull(5) ? null : r.GetString(5), Act = r.GetInt32(6) == 1, Fail = r.GetInt32(7), Lock = r.GetInt64(8) }, req.UserId);
+    if (u == null || !u.Act) return Results.Json(new { error = "Unknown user" }, statusCode: 401);
+    if (u.Lock > Now()) return Results.Json(new { error = $"Locked. Try again in {Math.Ceiling((u.Lock - Now()) / 60000.0)} min or ask an admin." }, statusCode: 423);
+    if (!Pin.Check(req.Pin ?? "", u.H, u.S))
+    {
+        var f = u.Fail + 1; var lockTo = f >= g.MaxFailed ? Now() + g.LockMinutes * 60000L : 0;
+        db.Exec("UPDATE users SET failed=$1, locked_until=$2 WHERE id=$0", u.Id, lockTo == 0 ? f : 0, lockTo);
+        db.Audit(u.Name, "pin_fail", $"attempt {f}");
+        return Results.Json(new { error = lockTo > 0 ? $"Too many tries. Locked for {g.LockMinutes} min." : "Wrong PIN" }, statusCode: 401);
+    }
+    db.Exec("UPDATE users SET failed=0, locked_until=0 WHERE id=$0", u.Id);
+    var me = new Me("pin", u.Id.ToString(), u.Name, u.Ini, u.Roles.Split(',', StringSplitOptions.RemoveEmptyEntries));
+    await c.SignInAsync(Principal(me));
+    db.Audit(u.Name, "login", "pin");
+    return Results.Ok(MeJson(me));
+});
+
+// Windows integrated sign-in (admins only). GET so the browser can complete the Negotiate handshake.
+api.MapGet("/auth/windows", async (HttpContext c) =>
+{
+    var r = await c.AuthenticateAsync(NegotiateDefaults.AuthenticationScheme);
+    if (!r.Succeeded || r.Principal?.Identity?.Name is not { } acct) { await c.ChallengeAsync(NegotiateDefaults.AuthenticationScheme); return; }
+    var local = acct.Contains('\\') ? acct[(acct.IndexOf('\\') + 1)..] : acct;
+    var row = db.One("SELECT account,name FROM admins WHERE account=$0 OR account=$1 OR (instr(account,'\\')=0 AND account=$1)",
+        x => new { Acct = x.GetString(0), Name = x.GetString(1) }, acct, local);
+    if (row == null) { db.Audit(acct, "windows_denied"); c.Response.StatusCode = 403; await c.Response.WriteAsJsonAsync(new { error = $"{acct} is not an admin." }); return; }
+    var me = new Me("win", acct, string.IsNullOrWhiteSpace(row.Name) ? acct : row.Name, Initials(row.Name, acct), ["admin", "coordinator", "receiver", "reviewer"]);
+    await c.SignInAsync(Principal(me));
+    db.Audit(acct, "login", "windows");
+    await c.Response.WriteAsJsonAsync(MeJson(me));
+});
+
+api.MapPost("/auth/logout", async (HttpContext c) => { await c.SignOutAsync(); return Results.Ok(); });
+
+/* ---------------- packets ---------------- */
+var pk = api.MapGroup("/packets").RequireAuthorization();
+
+pk.MapGet("", (bool? all) =>
+{
+    var cutoff = Now() - 60L * 86400000;
+    var rows = db.Query("SELECT id,bol,stage,created,updated,data FROM packets ORDER BY created DESC", r => PacketJson(r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt64(3), r.GetInt64(4), r.GetString(5)));
+    return rows.Where(p => all == true || p["stage"]!.GetValue<string>() != "filed" || p["updated"]!.GetValue<long>() > cutoff);
+});
+
+pk.MapGet("/{id}", (string id) => LoadPacket(id) is { } p ? Results.Ok(p.ToJson()) : Results.NotFound());
+
+pk.MapPost("", (ClaimsPrincipal u, HttpContext c, JsonObject body) =>
+{
+    var me = GetMe(u)!; if (!me.Has("coordinator")) return Results.Forbid();
+    var bol = body["bol"]?.GetValue<string>()?.Trim(); var rows = body["rows"] as JsonArray;
+    if (string.IsNullOrEmpty(bol) || rows == null || rows.Count == 0) return Results.BadRequest(new { error = "BOL # and at least one row are required." });
+    if (db.Query("SELECT 1 FROM packets WHERE bol=$0", r => 1, bol).Count > 0) return Results.Conflict(new { error = $"BOL {bol} is already in the system." });
+    var id = Guid.NewGuid().ToString("N")[..12];
+    var data = new JsonObject
+    {
+        ["vendor"] = Str(body, "vendor"), ["ship"] = Str(body, "ship"), ["carrier"] = Str(body, "carrier"),
+        ["rows"] = JsonNode.Parse(rows.ToJsonString()), ["forms"] = new JsonObject(), ["approvals"] = new JsonArray(), ["log"] = new JsonArray(), ["hasPdf"] = false
+    };
+    AddLog(data, me.Name, "Packet indexed, task created for receivers");
+    db.Exec("INSERT INTO packets(id,bol,stage,created,updated,data) VALUES($0,$1,'new',$2,$2,$3)", id, bol, Now(), data.ToJsonString());
+    var pkt = LoadPacket(id)!;
+    Notify("packet_created", pkt, me.Name, Origin(c));
+    db.Audit(me.Name, "packet_create", bol);
+    return Results.Ok(pkt.ToJson());
+});
+
+pk.MapPost("/{id}/pdf", async (string id, ClaimsPrincipal u, HttpContext c) =>
+{
+    var me = GetMe(u)!; if (!me.Has("coordinator")) return Results.Forbid();
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    var path = Path.Combine(dataDir, "pdfs", id + ".pdf");
+    await using (var fs = File.Create(path)) await c.Request.Body.CopyToAsync(fs);
+    p.Data["hasPdf"] = true; p.Save();
+    return Results.Ok();
+});
+
+pk.MapGet("/{id}/pdf", (string id) =>
+{
+    var path = Path.Combine(dataDir, "pdfs", Path.GetFileName(id) + ".pdf");
+    return File.Exists(path) ? Results.File(path, "application/pdf") : Results.NotFound();
+});
+
+pk.MapGet("/{id}/csv", (string id) =>
+{
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    string Q(string? s) => "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
+    var d = p.Data; var sb = new StringBuilder();
+    sb.AppendLine(string.Join(",", new[] { "BOL #", "Vendor", "Ship date", "PO #", "Heat #", "Mill coil / bundle #", "CC # (NBS#)", "Description", "Length", "Weight", "D365 receipt #", "Authorized by" }.Select(Q)));
+    foreach (var r in d["rows"]!.AsArray())
+        sb.AppendLine(string.Join(",", new[] { p.Bol, Str(d, "vendor"), Str(d, "ship"), Str(r, "po"), Str(r, "heat"), Str(r, "coil"), Str(r, "cc"), Str(r, "desc"), Str(r, "len"), Str(r, "wt"), Str(d, "d365"), Str(d, "authBy") }.Select(Q)));
+    return Results.File(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray(), "text/csv", $"DocuWare index BOL {p.Bol}.csv");
+});
+
+pk.MapPut("/{id}/forms/{po}/{type}", (string id, string po, string type, ClaimsPrincipal u, JsonObject body) =>
+{
+    var me = GetMe(u)!; if (!me.Has("receiver", "coordinator")) return Results.Forbid();
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage is not ("new" or "inspecting")) return Results.Conflict(new { error = "Packet is past inspection." });
+    var forms = p.Data["forms"]!.AsObject(); var key = po + "|" + type;
+    if (forms[key] is JsonObject old && old["submitted"]?.GetValue<bool>() == true) return Results.Conflict(new { error = "Already submitted. Reopen to edit." });
+    var submit = body["submit"]?.GetValue<bool>() == true;
+    forms[key] = new JsonObject { ["submitted"] = submit, ["date"] = Str(body, "date"), ["inspector"] = me.Initials, ["by"] = me.Name, ["items"] = JsonNode.Parse(body["items"]?.ToJsonString() ?? "[]") };
+    if (submit)
+    {
+        if (p.Stage == "new") p.Stage = "inspecting";
+        AddLog(p.Data, me.Initials, $"Submitted {TypeName(type)} inspection for {po}");
+    }
+    p.Save();
+    return Results.Ok(p.ToJson());
+});
+
+pk.MapPost("/{id}/forms/{po}/{type}/reopen", (string id, string po, string type, ClaimsPrincipal u) =>
+{
+    var me = GetMe(u)!; if (!me.Has("receiver", "coordinator")) return Results.Forbid();
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage is not ("new" or "inspecting")) return Results.Conflict(new { error = "Packet is past inspection." });
+    if (p.Data["forms"]![po + "|" + type] is JsonObject f) { f["submitted"] = false; AddLog(p.Data, me.Initials, $"Reopened {TypeName(type)} inspection for {po}"); p.Save(); }
+    return Results.Ok(p.ToJson());
+});
+
+pk.MapPost("/{id}/complete", (string id, ClaimsPrincipal u, HttpContext c) =>
+{
+    var me = GetMe(u)!; if (!me.Has("receiver", "coordinator")) return Results.Forbid();
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage is not ("new" or "inspecting")) return Results.Conflict(new { error = "Already complete." });
+    var forms = p.Data["forms"]!.AsObject();
+    var missing = Pos(p.Data).Where(po => !forms.Any(kv => kv.Key.StartsWith(po + "|") && kv.Value?["submitted"]?.GetValue<bool>() == true)).ToList();
+    if (missing.Count > 0) return Results.BadRequest(new { error = "No submitted inspection for " + string.Join(", ", missing) });
+    var reviewers = db.Query("SELECT id,name FROM users WHERE active=1 AND (',' || roles || ',') LIKE '%,reviewer,%'", r => new JsonObject { ["id"] = r.GetInt64(0).ToString(), ["name"] = r.GetString(1) });
+    if (p.Data["reviewerPick"] is JsonArray pick && pick.Count > 0) reviewers = pick.Select(x => (JsonObject)x!.DeepClone()).ToList();
+    p.Data["requiredReviewers"] = new JsonArray(reviewers.Select(x => (JsonNode)x).ToArray());
+    AddLog(p.Data, me.Name, "Inspection complete");
+    if (reviewers.Count == 0) { p.Stage = "receive"; AddLog(p.Data, "System", "No reviewers configured, skipped review"); p.Save(); Notify("review_complete", p, me.Name, Origin(c)); }
+    else { p.Stage = "review"; p.Save(); Notify("inspection_complete", p, me.Name, Origin(c)); }
+    return Results.Ok(p.ToJson());
+});
+
+pk.MapPost("/{id}/approve", (string id, ClaimsPrincipal u, HttpContext c) =>
+{
+    var me = GetMe(u)!;
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage != "review") return Results.Conflict(new { error = "Not in review." });
+    var req = p.Data["requiredReviewers"]!.AsArray(); var apr = p.Data["approvals"]!.AsArray();
+    if (!req.Any(r => r!["id"]!.GetValue<string>() == me.Id)) return Results.Forbid();
+    if (apr.Any(a => a!["id"]!.GetValue<string>() == me.Id)) return Results.Ok(p.ToJson());
+    apr.Add(new JsonObject { ["id"] = me.Id, ["n"] = me.Name, ["t"] = Now() });
+    AddLog(p.Data, me.Name, "Approved");
+    var done = cfg.General().ReviewRule == "any" || req.All(r => apr.Any(a => a!["id"]!.GetValue<string>() == r!["id"]!.GetValue<string>()));
+    if (done) { p.Stage = "receive"; AddLog(p.Data, "System", "Review complete"); }
+    p.Save();
+    if (done) Notify("review_complete", p, me.Name, Origin(c));
+    return Results.Ok(p.ToJson());
+});
+
+pk.MapPost("/{id}/receive", (string id, ClaimsPrincipal u, HttpContext c, JsonObject body) =>
+{
+    var me = GetMe(u)!; if (!me.Has("coordinator")) return Results.Forbid();
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage != "receive") return Results.Conflict(new { error = "Not ready to receive." });
+    var d365 = Str(body, "d365").Trim(); if (d365 == "") return Results.BadRequest(new { error = "D365 receipt # required." });
+    p.Data["d365"] = d365; p.Stage = "authorize"; AddLog(p.Data, me.Name, $"Received in D365 ({d365})"); p.Save();
+    Notify("received", p, me.Name, Origin(c));
+    return Results.Ok(p.ToJson());
+});
+
+pk.MapPost("/{id}/authorize", (string id, ClaimsPrincipal u, HttpContext c) =>
+{
+    var me = GetMe(u)!; if (!me.Has("coordinator")) return Results.Forbid();
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage != "authorize") return Results.Conflict(new { error = "Not ready to authorize." });
+    p.Data["authBy"] = me.Name; p.Data["authAt"] = Now(); p.Stage = "filed"; AddLog(p.Data, me.Name, "Authorized, filed"); p.Save();
+    Notify("filed", p, me.Name, Origin(c));
+    db.Audit(me.Name, "authorize", p.Bol);
+    return Results.Ok(p.ToJson());
+});
+
+api.MapGet("/reviewers", (ClaimsPrincipal u) =>
+{
+    var me = GetMe(u); if (me == null || !me.Has("coordinator")) return Results.Forbid();
+    return Results.Ok(db.Query("SELECT id,name FROM users WHERE active=1 AND (',' || roles || ',') LIKE '%,reviewer,%' ORDER BY name", r => new { id = r.GetInt64(0).ToString(), name = r.GetString(1) }));
+}).RequireAuthorization();
+
+// Intake can set who reviews a packet before inspection ends, and reassign while it is in review.
+pk.MapPost("/{id}/reviewers", (string id, ClaimsPrincipal u, HttpContext c, JsonObject body) =>
+{
+    var me = GetMe(u)!; if (!me.Has("coordinator")) return Results.Forbid();
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage is not ("new" or "inspecting" or "review")) return Results.Conflict(new { error = "Reviewers can only change before the packet is received." });
+    var ids = (body["ids"] as JsonArray)?.Select(x => x!.ToString()).Distinct().ToList() ?? new List<string>();
+    if (ids.Count == 0) return Results.BadRequest(new { error = "Pick at least one reviewer." });
+    var valid = db.Query("SELECT id,name FROM users WHERE active=1 AND (',' || roles || ',') LIKE '%,reviewer,%'", r => (id: r.GetInt64(0).ToString(), name: r.GetString(1))).ToDictionary(x => x.id, x => x.name);
+    if (ids.Any(i => !valid.ContainsKey(i))) return Results.BadRequest(new { error = "Only active users with the Reviewer role can be picked." });
+    var picked = new JsonArray(ids.Select(i => (JsonNode)new JsonObject { ["id"] = i, ["name"] = valid[i] }).ToArray());
+    var inReview = p.Stage == "review";
+    var oldIds = ((inReview ? p.Data["requiredReviewers"] : p.Data["reviewerPick"]) as JsonArray)?.Select(x => x!["id"]!.GetValue<string>()).ToList() ?? new List<string>();
+    var oldNames = ((inReview ? p.Data["requiredReviewers"] : p.Data["reviewerPick"]) as JsonArray)?.ToDictionary(x => x!["id"]!.GetValue<string>(), x => x!["name"]!.GetValue<string>()) ?? new Dictionary<string, string>();
+    var added = ids.Except(oldIds).ToList(); var removed = oldIds.Except(ids).ToList();
+    if (added.Count == 0 && removed.Count == 0) return Results.Ok(p.ToJson());
+    p.Data[inReview ? "requiredReviewers" : "reviewerPick"] = picked;
+    var parts = new List<string>();
+    if (added.Count > 0) parts.Add("added " + string.Join(", ", added.Select(i => valid[i])));
+    if (removed.Count > 0) parts.Add("removed " + string.Join(", ", removed.Select(i => oldNames.GetValueOrDefault(i, i))));
+    AddLog(p.Data, me.Name, "Reviewers changed: " + string.Join("; ", parts));
+    var advance = false;
+    if (inReview)
+    {
+        var apr = p.Data["approvals"]!.AsArray();
+        bool Approved(string i) => apr.Any(a => a!["id"]!.GetValue<string>() == i);
+        advance = cfg.General().ReviewRule == "any" ? ids.Any(Approved) : ids.All(Approved);
+        if (advance) { p.Stage = "receive"; AddLog(p.Data, "System", "Review complete"); }
+    }
+    p.Save();
+    var origin = Origin(c);
+    if (advance) Notify("review_complete", p, me.Name, origin);
+    else if (inReview && added.Count > 0) NotifyUsers("inspection_complete", p, me.Name, origin, added);
+    db.Audit(me.Name, "reviewers_changed", p.Bol + ": " + string.Join("; ", parts));
+    return Results.Ok(p.ToJson());
+});
+
+/* ---------------- admin ---------------- */
+var ad = api.MapGroup("/admin").RequireAuthorization("Admin");
+
+ad.MapGet("/users", () => db.Query("SELECT id,name,initials,email,roles,active,pin_hash IS NOT NULL,locked_until FROM users ORDER BY name",
+    r => new { id = r.GetInt64(0), name = r.GetString(1), initials = r.GetString(2), email = r.GetString(3), roles = r.GetString(4).Split(',', StringSplitOptions.RemoveEmptyEntries), active = r.GetInt32(5) == 1, pinSet = r.GetInt32(6) == 1, locked = r.GetInt64(7) > Now() }));
+
+ad.MapPost("/users", (ClaimsPrincipal u, UserReq q) =>
+{
+    var err = ValidateUser(q, true); if (err != null) return Results.BadRequest(new { error = err });
+    var (h, s) = string.IsNullOrEmpty(q.Pin) ? ((string?)null, (string?)null) : Pin.Make(q.Pin);
+    var id = db.Insert("INSERT INTO users(name,initials,email,roles,pin_hash,pin_salt,active,created) VALUES($0,$1,$2,$3,$4,$5,1,$6)",
+        q.Name!.Trim(), (q.Initials ?? Initials(q.Name!, "")).Trim().ToUpperInvariant(), (q.Email ?? "").Trim(), string.Join(",", q.Roles!), h, s, Now());
+    db.Audit(GetMe(u)!.Name, "user_create", q.Name!);
+    return Results.Ok(new { id });
+});
+
+ad.MapPut("/users/{id:long}", (long id, ClaimsPrincipal u, UserReq q) =>
+{
+    var err = ValidateUser(q, false); if (err != null) return Results.BadRequest(new { error = err });
+    db.Exec("UPDATE users SET name=$1,initials=$2,email=$3,roles=$4,active=$5 WHERE id=$0", id, q.Name!.Trim(), (q.Initials ?? "").Trim().ToUpperInvariant(), (q.Email ?? "").Trim(), string.Join(",", q.Roles!), q.Active == false ? 0 : 1);
+    if (!string.IsNullOrEmpty(q.Pin)) { var (h, s) = Pin.Make(q.Pin); db.Exec("UPDATE users SET pin_hash=$1,pin_salt=$2,failed=0,locked_until=0 WHERE id=$0", id, h, s); }
+    if (q.Unlock == true) db.Exec("UPDATE users SET failed=0,locked_until=0 WHERE id=$0", id);
+    db.Audit(GetMe(u)!.Name, "user_update", q.Name!);
+    return Results.Ok();
+});
+
+ad.MapGet("/admins", () => db.Query("SELECT account,name,email FROM admins ORDER BY account", r => new { account = r.GetString(0), name = r.GetString(1), email = r.GetString(2) }));
+ad.MapPost("/admins", (ClaimsPrincipal u, AdminReq q) =>
+{
+    if (string.IsNullOrWhiteSpace(q.Account)) return Results.BadRequest(new { error = @"Account is required, like BG\first.last" });
+    db.Exec("INSERT INTO admins(account,name,email,added_by,added_at) VALUES($0,$1,$2,$3,$4) ON CONFLICT(account) DO UPDATE SET name=excluded.name,email=excluded.email",
+        q.Account.Trim(), q.Name ?? "", q.Email ?? "", GetMe(u)!.Name, Now());
+    db.Audit(GetMe(u)!.Name, "admin_add", q.Account);
+    return Results.Ok();
+});
+ad.MapDelete("/admins", (string account, ClaimsPrincipal u) =>
+{
+    if (db.Query("SELECT 1 FROM admins", r => 1).Count <= 1) return Results.BadRequest(new { error = "Cannot remove the last admin." });
+    db.Exec("DELETE FROM admins WHERE account=$0", account);
+    db.Audit(GetMe(u)!.Name, "admin_remove", account);
+    return Results.Ok();
+});
+
+ad.MapGet("/settings", () =>
+{
+    var s = cfg.Smtp();
+    return new { general = cfg.General(), smtp = new { s.Host, s.Port, s.Security, s.User, s.FromAddr, s.FromName, hasPassword = s.Password != "" }, notifs = cfg.Notifs() };
+});
+ad.MapPut("/settings", (ClaimsPrincipal u, SettingsReq q) =>
+{
+    var g = q.General; if (g.PinLength is < 4 or > 8) return Results.BadRequest(new { error = "PIN length must be 4 to 8." });
+    if (g.IdleMinutes is < 1 or > 480) return Results.BadRequest(new { error = "Idle timeout must be 1 to 480 minutes." });
+    cfg.SetGeneral(g);
+    cfg.SetSmtp(new SmtpCfg { Host = q.Smtp.Host ?? "", Port = q.Smtp.Port, Security = q.Smtp.Security ?? "None", User = q.Smtp.User ?? "", FromAddr = q.Smtp.FromAddr ?? "", FromName = q.Smtp.FromName ?? "" }, q.Smtp.Password);
+    cfg.SetNotifs(q.Notifs);
+    db.Audit(GetMe(u)!.Name, "settings_update");
+    return Results.Ok();
+});
+JsonObject SamplePacket() => JsonNode.Parse("""{"vendor":"Nucor Berkeley","ship":"08/22/26","carrier":"FTMG","d365":"PR-100482","rows":[{"po":"TX-0015373","heat":"1612252","cc":"161886","desc":"W12x30","len":"43' 0\"","wt":"7,740"},{"po":"TX-0015373","heat":"2612251","cc":"161887","desc":"W12x30","len":"43' 0\"","wt":"7,740"},{"po":"TX-0015478","heat":"1612390","cc":"161891","desc":"W12x26","len":"50' 0\"","wt":"7,800"}]}""")!.AsObject();
+
+ad.MapPost("/test-email", async (ClaimsPrincipal u, HttpContext c, JsonObject body) =>
+{
+    var to = Str(body, "to"); if (to == "") return Results.BadRequest(new { error = "Enter an address." });
+    var sent = new List<string>(); var failed = new List<string>(); var origin = Origin(c); var me = GetMe(u)!;
+    foreach (var n in cfg.Notifs())
+    {
+        try
+        {
+            var (subject, text, html) = Compose(n.Event, n, SamplePacket(), "1929915", "review", "sample", me.Name, origin, false);
+            await mail.SendNow(to, "[TEST] " + subject, text, html);
+            sent.Add(n.Label);
+        }
+        catch (Exception ex) { failed.Add(n.Label + ": " + ex.Message); if (sent.Count == 0) break; }
+    }
+    db.Audit(me.Name, "test_emails", $"{to} sent={sent.Count} failed={failed.Count}");
+    return failed.Count > 0 && sent.Count == 0 ? Results.BadRequest(new { error = failed[0] }) : Results.Ok(new { sent = sent.Count, failed });
+});
+ad.MapGet("/notif-defaults", () => SettingsStore.DefaultNotifs());
+ad.MapPost("/preview-email", (HttpContext c, JsonObject body) =>
+{
+    var evt = Str(body, "event");
+    var d = SamplePacket();
+    var n = new NotifCfg { Event = evt, Subject = Str(body, "subject"), Body = Str(body, "body") };
+    var (subject, _, html) = Compose(evt, n, d, "1929915", "review", "sample", GetMe(c.User)!.Name, Origin(c), true);
+    return Results.Ok(new { subject, html });
+});
+ad.MapPost("/seed-demo", (ClaimsPrincipal u) =>
+{
+    if (db.Query("SELECT 1 FROM packets", r => 1).Count > 0) return Results.BadRequest(new { error = "Packets already exist. Demo data only loads into an empty system." });
+    var demoDir = Path.GetFullPath(app.Configuration["DemoDir"] ?? @"..\..", app.Environment.ContentRootPath);
+    long Ago(double h) => Now() - (long)(h * 3600000);
+    long NewUser(string name, string ini, string role, string pin)
+    {
+        var ex = db.Query("SELECT id FROM users WHERE name=$0", r => r.GetInt64(0), name);
+        if (ex.Count > 0) return ex[0];
+        var (h, s) = Pin.Make(pin);
+        return db.Insert("INSERT INTO users(name,initials,email,roles,pin_hash,pin_salt,active,created) VALUES($0,$1,'',$2,$3,$4,1,$5)", name, ini, role, h, s, Now());
+    }
+    NewUser("Receiver One", "R1", "receiver", "1111"); NewUser("Receiver Two", "R2", "receiver", "2222");
+    NewUser("Demo Coordinator", "DC", "coordinator", "3333"); var rev = NewUser("Demo Reviewer", "DR", "reviewer", "4444");
+    void Add(string bol, string vendor, string ship, string carrier, string pdf, string stage, double hrs, object rows, object forms, object[] log, object[] approvals, object[] required)
+    {
+        var id = Guid.NewGuid().ToString("N")[..12];
+        var src = Path.Combine(demoDir, pdf); var has = File.Exists(src);
+        if (has) File.Copy(src, Path.Combine(dataDir, "pdfs", id + ".pdf"), true);
+        var d = JsonSerializer.SerializeToNode(new { vendor, ship, carrier, rows, forms, approvals, requiredReviewers = required, log, hasPdf = has })!;
+        db.Exec("INSERT INTO packets(id,bol,stage,created,updated,data) VALUES($0,$1,$2,$3,$4,$5)", id, bol, stage, Ago(hrs), Ago(hrs), d.ToJsonString());
+    }
+    object L(double h, string who, string what) => new { t = Ago(h), who, what };
+    object Row(string po, string heat, string coil, string cc, string desc, string wt, string len = "") => new { po, heat, coil, cc, desc, len, wt };
+    object F(string by, string ini, string date, params object[] items) => new { submitted = true, date, inspector = ini, by, items };
+    object It(object row, object meas, int src)
+    {
+        var o = JsonSerializer.SerializeToNode(meas)!.AsObject(); var r = JsonSerializer.SerializeToNode(row)!.AsObject();
+        o["src"] = src.ToString(); o["heat"] = r["heat"]?.DeepClone(); o["desc"] = r["desc"]?.DeepClone(); o["cc"] = r["cc"]?.DeepClone(); o["coil"] = r["coil"]?.DeepClone();
+        return o;
+    }
+
+    Add("1487848", "Nucor Hickman (Arkansas)", "12/23/25", "Preston Richey Trucking", "B5 Completed Preliminary BOL-MTR Packet.pdf", "new", 1.5,
+        new[] { Row("TX-0013183", "2157562", "2115023.1000", "156832", ".0940 x 14.0600 HRO", "13,406", "2833"), Row("TX-0013183", "2157562", "2115023.2000", "156833", ".0940 x 14.0600 HRO", "13,406", "2833"), Row("TX-0013183", "2157562", "2115023.3000", "156834", ".0940 x 14.0600 HRO", "13,406", "2833") },
+        new { }, new[] { L(1.5, "Demo Coordinator", "Packet indexed, task created for receivers") }, Array.Empty<object>(), Array.Empty<object>());
+
+    var berk = new[] { Row("TX-0015373", "1612252", "61123384", "161886", "W12x30", "7,740", "43' 0\""), Row("TX-0015373", "2612251", "61123486", "161887", "W12x30", "7,740", "43' 0\""), Row("TX-0015373", "2612253", "61123402", "161888", "W12x30", "7,740", "43' 0\""), Row("TX-0015373", "1612252", "61123386", "161889", "W12x30", "7,740", "43' 0\""), Row("TX-0015373", "1612252", "61123385", "161890", "W12x30", "7,740", "43' 0\""), Row("TX-0015478", "1612390", "61124736", "161891", "W12x26", "7,800", "50' 0\"") };
+    Add("1929915", "Nucor Berkeley", "08/22/26", "FTMG", "Berkeley Multi PO, multi insp packet.pdf", "inspecting", 5, berk,
+        new Dictionary<string, object>
+        {
+            ["TX-0015373|shape"] = F("Receiver One", "R1", "2026-08-24", It(berk[0], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = "84", visual = "ok", cert = "ok" }, 0), It(berk[1], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = "86", visual = "ok", cert = "ok" }, 1), It(berk[2], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = ".02", visual = "ok", cert = "ok" }, 2), It(berk[3], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = "86", visual = "ok", cert = "ok" }, 3), It(berk[4], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = "85", visual = "ok", cert = "ok" }, 4)),
+            ["TX-0015478|shape"] = new { submitted = false, date = "2026-08-24", inspector = "R1", by = "Receiver One", items = new object[] { It(berk[5], new { qty = "6", depth = "6 3/8" }, 5) } }
+        },
+        new[] { L(5, "Demo Coordinator", "Packet indexed, task created for receivers"), L(3, "R1", "Submitted Beam/channel/angle inspection for TX-0015373") }, Array.Empty<object>(), Array.Empty<object>());
+
+    var delta = new[] { Row("TX-0016400", "18720D", "", "161792", "Tubing 12 x 8 x 3/8 x 28'", "1,341", "28' 0\""), Row("TX-0016400", "19163D", "", "161793", "Tubing 6 x 6 x 3/8 x 24'", "660", "24' 0\""), Row("TX-0016400", "627667", "", "161794", "Wide flange 18 x 40# x 50'", "4,000", "50' 0\""), Row("TX-0016400", "b270501", "", "161795", "Channel 8 x 18.75# x 30'", "563", "30' 0\"") };
+    Add("327874", "Delta Steel Inc", "08/18/26", "Classic Transport LLC", "Delta multi Insp sheet packet.pdf", "review", 30, delta,
+        new Dictionary<string, object>
+        {
+            ["TX-0016400|tube"] = new { submitted = true, date = "2026-08-18", inspector = "R1", by = "Receiver One", items = new object[] { It(delta[0], new { qty = "1", wall = ".351", od = "8 x 12" }, 0), It(delta[1], new { qty = "1", wall = ".354", od = "6 x 6" }, 1) } },
+            ["TX-0016400|shape"] = new { submitted = true, date = "2026-08-18", inspector = "R1", by = "Receiver One", items = new object[] { It(delta[2], new { qty = "2", depth = "18", width = "6", thick = ".327", visual = "ok", cert = "ok" }, 2), It(delta[3], new { qty = "1", depth = "8 5/8", width = "2 1/2", thick = ".277", visual = "ok", cert = "ok" }, 3) } }
+        },
+        new[] { L(30, "Demo Coordinator", "Packet indexed, task created for receivers"), L(27, "R1", "Submitted Rod/pipe/tube inspection for TX-0016400"), L(26, "R1", "Submitted Beam/channel/angle inspection for TX-0016400"), L(26, "Receiver One", "Inspection complete") },
+        Array.Empty<object>(), new object[] { new { id = rev.ToString(), name = "Demo Reviewer" } });
+
+    db.Audit(GetMe(u)!.Name, "seed_demo");
+    return Results.Ok(new { users = "Receiver One 1111, Receiver Two 2222, Demo Coordinator 3333, Demo Reviewer 4444", packets = 3 });
+});
+ad.MapGet("/outbox", () => db.Query("SELECT id,to_addr,subject,event,status,attempts,error,created,sent_at FROM outbox ORDER BY id DESC LIMIT 100",
+    r => new { id = r.GetInt64(0), to = r.GetString(1), subject = r.GetString(2), evt = r.IsDBNull(3) ? "" : r.GetString(3), status = r.GetString(4), attempts = r.GetInt32(5), error = r.IsDBNull(6) ? "" : r.GetString(6), created = r.GetInt64(7), sentAt = r.IsDBNull(8) ? 0 : r.GetInt64(8) }));
+ad.MapPost("/outbox/{id:long}/retry", (long id) => { db.Exec("UPDATE outbox SET status='pending',attempts=0,next_try=0 WHERE id=$0", id); return Results.Ok(); });
+ad.MapGet("/audit", () => db.Query("SELECT ts,actor,action,detail FROM audit ORDER BY id DESC LIMIT 200", r => new { ts = r.GetInt64(0), actor = r.IsDBNull(1) ? "" : r.GetString(1), action = r.GetString(2), detail = r.IsDBNull(3) ? "" : r.GetString(3) }));
+
+app.MapFallbackToFile("index.html");
+app.Run();
+
+/* ---------------- helpers ---------------- */
+Me? GetMe(ClaimsPrincipal u)
+{
+    if (u.Identity?.IsAuthenticated != true) return null;
+    return new Me(u.FindFirstValue("kind") ?? "pin", u.FindFirstValue(ClaimTypes.NameIdentifier) ?? "", u.FindFirstValue(ClaimTypes.Name) ?? "", u.FindFirstValue("initials") ?? "",
+        u.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray());
+}
+object MeJson(Me m) => new { m.Kind, m.Id, m.Name, m.Initials, m.Roles, idleMinutes = cfg.General().IdleMinutes };
+ClaimsPrincipal Principal(Me m)
+{
+    var cl = new List<Claim> { new(ClaimTypes.NameIdentifier, m.Id), new(ClaimTypes.Name, m.Name), new("initials", m.Initials), new("kind", m.Kind) };
+    cl.AddRange(m.Roles.Select(r => new Claim(ClaimTypes.Role, r)));
+    return new ClaimsPrincipal(new ClaimsIdentity(cl, CookieAuthenticationDefaults.AuthenticationScheme));
+}
+string Initials(string? name, string fallback)
+{
+    var n = string.IsNullOrWhiteSpace(name) ? fallback : name;
+    var parts = n.Split(new[] { ' ', '.', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+    return string.Concat(parts.Take(2).Select(p => char.ToUpperInvariant(p[0])));
+}
+string? ValidateUser(UserReq q, bool isNew)
+{
+    if (string.IsNullOrWhiteSpace(q.Name)) return "Name is required.";
+    if (q.Roles == null || q.Roles.Length == 0 || q.Roles.Any(r => !AllRoles.Contains(r))) return "Pick at least one role.";
+    var len = cfg.General().PinLength;
+    if (!string.IsNullOrEmpty(q.Pin) && (q.Pin.Length != len || !q.Pin.All(char.IsDigit))) return $"PIN must be {len} digits.";
+    if (!string.IsNullOrWhiteSpace(q.Email) && !q.Email.Contains('@')) return "Email looks wrong.";
+    return null;
+}
+string Str(JsonNode? n, string k) => n?[k] is JsonValue v && v.TryGetValue<string>(out var s) ? s : (n?[k]?.ToString() ?? "");
+string TypeName(string t) => t switch { "coil" => "Coil", "sheet" => "Flat sheet", "bar" => "Flat bar", "shape" => "Beam/channel/angle", "tube" => "Rod/pipe/tube", _ => t };
+IEnumerable<string> Pos(JsonObject d) => d["rows"]!.AsArray().Select(r => Str(r, "po")).Where(x => x != "").Distinct();
+void AddLog(JsonObject d, string who, string what)
+{
+    if (d["log"] is not JsonArray a) d["log"] = a = new JsonArray();
+    a.Add(new JsonObject { ["t"] = Now(), ["who"] = who, ["what"] = what });
+}
+string Origin(HttpContext c) { var b = cfg.General().BaseUrl.Trim().TrimEnd('/'); return b != "" ? b : $"{c.Request.Scheme}://{c.Request.Host}"; }
+JsonObject PacketJson(string id, string bol, string stage, long created, long updated, string data)
+{
+    var o = JsonNode.Parse(data)!.AsObject(); o["id"] = id; o["bol"] = bol; o["stage"] = stage; o["created"] = created; o["updated"] = updated; return o;
+}
+PacketRec? LoadPacket(string id) =>
+    db.One("SELECT id,bol,stage,created,data FROM packets WHERE id=$0", r => new PacketRec(db, r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt64(3), JsonNode.Parse(r.GetString(4))!.AsObject()), id);
+
+(string subject, string text, string html) Compose(string evt, NotifCfg n, JsonObject d, string bol, string stage, string id, string actor, string origin, bool preview)
+{
+    var vars = new Dictionary<string, string>
+    {
+        ["bol"] = bol, ["vendor"] = Str(d, "vendor"), ["pos"] = string.Join(", ", Pos(d)), ["items"] = d["rows"]!.AsArray().Count.ToString(),
+        ["actor"] = actor, ["d365"] = Str(d, "d365"), ["stage"] = stage, ["link"] = $"{origin}/#/p/{id}"
+    };
+    var subject = Mailer.Render(n.Subject, vars); var intro = Mailer.Render(n.Body, vars);
+    var facts = new List<(string, string)> { ("BOL #", bol), ("Vendor", Str(d, "vendor")), ("Ship date", Str(d, "ship")), ("Carrier", Str(d, "carrier")), ("PO #", string.Join(", ", Pos(d))) };
+    if (evt is "received" or "filed") facts.Add(("D365 receipt", Str(d, "d365")));
+    if (evt == "filed") facts.Add(("Authorized by", actor));
+    facts.RemoveAll(f => string.IsNullOrWhiteSpace(f.Item2));
+    var items = d["rows"]!.AsArray().Select(r => new MailHtml.Item(Str(r, "po"), Str(r, "heat"), Str(r, "cc"), Str(r, "desc"), Str(r, "len"), Str(r, "wt"))).ToList();
+    var st = MailHtml.StyleFor(evt); var site = cfg.General().SiteName; var link = vars["link"];
+    var html = MailHtml.Html(site, st, intro, facts, items, link, st.Button, intro.Split('\n')[0], preview ? mail.LogoDataUri() : "cid:logo");
+    return (subject, MailHtml.Text(site, st, intro, facts, items, link), html);
+}
+
+void Notify(string evt, PacketRec p, string actor, string origin)
+{
+    var n = cfg.Notifs().FirstOrDefault(x => x.Event == evt); if (n == null || !n.Enabled) return;
+    var to = new List<string>();
+    foreach (var role in n.Roles)
+        to.AddRange(db.Query("SELECT email FROM users WHERE active=1 AND email<>'' AND (',' || roles || ',') LIKE $0", r => r.GetString(0), "%," + role + ",%"));
+    foreach (var uid in n.UserIds) to.AddRange(db.Query("SELECT email FROM users WHERE active=1 AND email<>'' AND id=$0", r => r.GetString(0), uid));
+    to.AddRange(n.Extra.Split(new[] { ',', ';', ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries));
+    var (subject, text, html) = Compose(evt, n, p.Data, p.Bol, p.Stage, p.Id, actor, origin, false);
+    mail.Enqueue(evt, p.Id, to, subject, text, html);
+}
+
+void NotifyUsers(string evt, PacketRec p, string actor, string origin, IEnumerable<string> userIds)
+{
+    var n = cfg.Notifs().FirstOrDefault(x => x.Event == evt); if (n == null || !n.Enabled) return;
+    var to = new List<string>();
+    foreach (var uid in userIds) to.AddRange(db.Query("SELECT email FROM users WHERE active=1 AND email<>'' AND id=$0", r => r.GetString(0), long.Parse(uid)));
+    var (subject, text, html) = Compose(evt, n, p.Data, p.Bol, p.Stage, p.Id, actor, origin, false);
+    mail.Enqueue(evt, p.Id, to, subject, text, html);
+}
+
+record Me(string Kind, string Id, string Name, string Initials, string[] Roles)
+{
+    public bool Admin => Roles.Contains("admin");
+    public bool Has(params string[] r) => Admin || r.Any(Roles.Contains);
+}
+record PinReq(long UserId, string? Pin);
+record UserReq(string? Name, string? Initials, string? Email, string[]? Roles, string? Pin, bool? Active, bool? Unlock);
+record AdminReq(string? Account, string? Name, string? Email);
+record SmtpReq(string? Host, int Port, string? Security, string? User, string? FromAddr, string? FromName, string? Password);
+record SettingsReq(GeneralCfg General, SmtpReq Smtp, List<NotifCfg> Notifs);
+
+class PacketRec(Db db, string id, string bol, string stage, long created, JsonObject data)
+{
+    public string Id = id, Bol = bol; public string Stage = stage; public long Created = created; public JsonObject Data = data;
+    public void Save() => db.Exec("UPDATE packets SET stage=$1,updated=$2,data=$3 WHERE id=$0", Id, Stage, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Data.ToJsonString());
+    public JsonObject ToJson()
+    {
+        var o = JsonNode.Parse(Data.ToJsonString())!.AsObject();
+        o["id"] = Id; o["bol"] = Bol; o["stage"] = Stage; o["created"] = Created; return o;
+    }
+}

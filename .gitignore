@@ -1,0 +1,11 @@
+# build output
+bin/
+obj/
+.vs/
+*.user
+
+# runtime data: database, uploaded packet PDFs, encryption keys, saved SMTP password
+src/Receiving.Web/data/
+
+# source packets (BOLs, MTRs, POs with vendor and pricing info) stay on the local machine
+/*.pdf

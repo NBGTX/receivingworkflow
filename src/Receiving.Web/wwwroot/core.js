@@ -1,0 +1,148 @@
+/* core: utils, api, auth, shell, router */
+const $=s=>document.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const IC={
+ inbox:'<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>',
+ list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+ plus:'<path d="M12 5v14M5 12h14"/>',
+ file:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
+ check:'<path d="M20 6 9 17l-5-5"/>',
+ back:'<path d="M15 18l-6-6 6-6"/>',
+ search:'<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+ rot:'<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+ dl:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+ info:'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+ gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+ stamp:'<path d="M9 11V6a3 3 0 1 1 6 0v5"/><path d="M5 21h14v-4a3 3 0 0 0-3-3H8a3 3 0 0 0-3 3z"/>',
+ out:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'};
+const ic=n=>`<svg class="ic" viewBox="0 0 24 24">${IC[n]||''}</svg>`;
+
+const STAGES=[['new','Awaiting inspection'],['inspecting','In inspection'],['review','In review'],['receive','Ready to receive'],['authorize','Ready to authorize'],['filed','Filed']];
+const SL=Object.fromEntries(STAGES);
+/* Columns match the paper sheets in the Inspections folder, in sheet order.
+   Heat #, Description, NBS # (CC #), and Coil # are pre-filled from the packet. 'ok' = OK/Reject toggle. */
+const TYPES=[
+ {k:'coil',n:'Coil',form:'QCF001',tol:'coil',tolRegion:[.63,.98],show:['coil','heat','desc','cc'],meas:[['id','I.D.'],['od','O.D.'],['gauge','Gauge'],['width','Width'],['color','Color','text']],post:[]},
+ {k:'sheet',n:'Flat sheet',form:'QCF023',tol:'sheet',tolRegion:[.70,.90],show:['heat','desc','cc'],meas:[['qty','Qty. Rec./BOL'],['len','Length'],['width','Width'],['gauge','Gauge']],post:[]},
+ {k:'bar',n:'Flat bar',form:'QCF005',tol:'bar',tolRegion:[.61,.91],show:['heat','desc','cc'],meas:[['qty','Qnty Rec./BOL'],['width','Width'],['thick','Thick'],['sweep','Sweep / Camber'],['surface','Surface','ok']],post:[['cert','Cert.','ok']]},
+ {k:'shape',n:'Beam, channel, angle',form:'QCF011',tol:null,show:['heat','desc','cc'],meas:[['qty','Qty. Rec./BOL'],['depth','Depth'],['width','Width'],['visual','Visual Insp.','ok'],['thick','Thickness'],['sweep','Sweep / Camber']],post:[['cert','Cert.','ok']]},
+ {k:'tube',n:'Rod, pipe, tube',form:'QCF008',tol:'tube',tolRegion:[.69,.91],show:['heat','desc','cc'],meas:[['qty','Qnty Rec./BOL'],['wall','Wall Thickness'],['od','O.D.'],['surface','Surface','ok'],['sweep','Sweep / Camber']],post:[['cert','Cert.','ok']]}];
+const FL={coil:'Coil #',heat:'Heat #',desc:'Description',cc:'NBS # (CC #)',po:'PO #',wt:'Weight'};
+const ago=ts=>{const m=(Date.now()-ts)/6e4;return m<1?'now':m<60?Math.round(m)+' min':m<1440?Math.round(m/60)+' h':Math.round(m/1440)+' d'};
+const fdate=ts=>new Date(ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+function toast(t,bad){const e=$('#toast');e.textContent=t;e.style.background=bad?'var(--red)':'';e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('show'),2600)}
+
+/* ---- api ---- */
+const S={me:null,cfg:{siteName:'Steel Receiving',idleMinutes:15,pinLength:4},packets:[]};
+async function api(method,url,body,ctype){
+  const h={'X-Requested-With':'fetch'};let b;
+  if(body instanceof ArrayBuffer){b=body;h['Content-Type']=ctype||'application/octet-stream'}
+  else if(body!==undefined){b=JSON.stringify(body);h['Content-Type']='application/json'}
+  const r=await fetch(url,{method,headers:h,body:b,credentials:'same-origin'});
+  if(r.status===401&&!url.includes('/auth/')){S.me=null;showLogin();throw new Error('Signed out')}
+  let j=null;const t=await r.text();try{j=t?JSON.parse(t):null}catch(e){}
+  if(!r.ok)throw new Error((j&&(j.error||j.title))||('Request failed ('+r.status+')'));
+  return j;
+}
+const has=(...r)=>S.me&&(S.me.roles.includes('admin')||r.some(x=>S.me.roles.includes(x)));
+const P=id=>S.packets.find(p=>p.id===id);
+const pos=p=>[...new Set(p.rows.map(r=>r.po))];
+const subForms=(p,po)=>TYPES.filter(t=>p.forms[po+'|'+t.k]?.submitted);
+const covered=p=>pos(p).filter(po=>subForms(p,po).length).length;
+const lastT=p=>(p.log[p.log.length-1]||{}).t||p.created;
+async function loadPackets(){S.packets=await api('GET','/api/packets')}
+function upsert(p){const i=S.packets.findIndex(x=>x.id===p.id);if(i>=0)S.packets[i]=p;else S.packets.unshift(p)}
+
+/* ---- login ---- */
+let idleT=null;
+function resetIdle(){clearTimeout(idleT);if(!S.me)return;idleT=setTimeout(()=>logout('Signed out after inactivity'),(S.me.idleMinutes||15)*60000)}
+['pointerdown','keydown','touchstart'].forEach(e=>addEventListener(e,resetIdle,{passive:true}));
+async function logout(msg){try{await api('POST','/api/auth/logout')}catch(e){}S.me=null;S.packets=[];clearTimeout(idleT);showLogin(msg)}
+async function showLogin(msg){
+  $('#tabs').innerHTML='';$('#who').innerHTML='';closeDrawer&&closeDrawer();
+  $('#app').innerHTML=`<div class="login"><h1>Who is working?</h1><p>${esc(msg||'Tap your card, then enter your PIN.')}</p><div class="ucards" id="ucards"></div>
+   <div class="adminlink"><button class="btn" id="winbtn">${ic('stamp')} Admin sign-in (Windows)</button><p class="hint" id="winerr" style="margin-top:10px"></p></div></div>`;
+  $('#winbtn').onclick=winLogin;
+  try{
+    const cards=await api('GET','/api/auth/cards');
+    $('#ucards').innerHTML=cards.length?cards.map(c=>`<div class="ucard" data-id="${c.id}" data-n="${esc(c.name)}" data-i="${esc(c.initials||c.name.slice(0,2))}"><div class="av">${esc((c.initials||c.name.slice(0,2)).toUpperCase())}</div><b>${esc(c.name)}</b><span>${esc(c.roles.join(', '))}</span></div>`).join(''):'<div class="card empty" style="grid-column:1/-1">No users yet. An admin signs in with Windows, then adds people in Settings.</div>';
+    $$('.ucard').forEach(c=>c.onclick=()=>pinPad(+c.dataset.id,c.dataset.n,c.dataset.i));
+  }catch(e){$('#ucards').innerHTML='<div class="card empty err" style="grid-column:1/-1">'+esc(e.message)+'</div>'}
+}
+async function winLogin(){
+  const e=$('#winerr');e.textContent='Checking Windows sign-in...';e.className='hint';
+  try{const r=await fetch('/api/auth/windows',{credentials:'same-origin'});const j=await r.json().catch(()=>null);
+    if(!r.ok)throw new Error(j?.error||'Windows sign-in failed ('+r.status+'). Open the site from your work PC on the company network.');
+    S.me=j;await enter()}catch(x){e.textContent=x.message;e.className='hint err'}
+}
+function pinPad(id,name,ini){
+  let v='';const L=S.cfg.pinLength;
+  const w=document.createElement('div');w.className='pinwrap';
+  w.innerHTML=`<div class="pinbox"><div class="av">${esc(ini.toUpperCase())}</div><b style="font-size:19px;color:var(--dg)">${esc(name)}</b><div class="dots" id="dots"></div><div class="pinerr" id="perr"></div>
+   <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button data-k="${n}">${n}</button>`).join('')}<button class="sm" data-k="x">Cancel</button><button data-k="0">0</button><button class="sm" data-k="b">&#9003;</button></div></div>`;
+  document.body.appendChild(w);
+  const dots=()=>$('#dots').innerHTML=Array.from({length:L},(_,i)=>`<i class="${i<v.length?'f':''}"></i>`).join('');dots();
+  w.querySelectorAll('[data-k]').forEach(b=>b.onclick=async()=>{
+    const k=b.dataset.k;
+    if(k==='x'){w.remove();return}
+    if(k==='b')v=v.slice(0,-1);else if(v.length<L)v+=k;
+    dots();$('#perr').textContent='';
+    if(v.length===L){
+      try{S.me=await api('POST','/api/auth/pin',{userId:id,pin:v});w.remove();await enter()}
+      catch(e){$('#perr').textContent=e.message;v='';dots();const pb=w.querySelector('.pinbox');pb.classList.remove('shake');void pb.offsetWidth;pb.classList.add('shake')}
+    }
+  });
+}
+
+/* ---- shell ---- */
+function firstRoute(){return has('receiver')&&!has('coordinator')?'/inbox':has('reviewer')&&!has('coordinator')&&!has('receiver')?'/reviews':has('coordinator')?'/board':'/inbox'}
+async function enter(){
+  resetIdle();
+  try{S.cfg=await api('GET','/api/config')}catch(e){}
+  renderShell();
+  if(!location.hash||location.hash==='#/'||location.hash==='#')location.hash=firstRoute();
+  route();
+}
+function renderShell(){
+  const m=S.me;if(!m)return;
+  $('#who').innerHTML=`<div class="userchip"><div style="text-align:right"><b>${esc(m.name)}</b><small>${m.roles.includes('admin')?'admin':esc(m.roles.join(', '))}</small></div><div class="avatar">${esc((m.initials||'?').toUpperCase())}</div></div><button class="btn sm" id="logout" style="margin-left:6px">${ic('out')} Sign out</button>`;
+  $('#logout').onclick=()=>logout();
+  $('.brand b').textContent=S.cfg.siteName||'Steel Receiving';
+}
+function tabsFor(){
+  const t=[];
+  if(has('receiver'))t.push(['inbox','inbox','My inbox']);
+  if(has('reviewer'))t.push(['reviews','stamp','Reviews']);
+  if(has('coordinator')){t.push(['board','list','Packets']);t.push(['new','plus','New packet'])}
+  if(has('admin'))t.push(['settings','gear','Settings']);
+  return t;
+}
+function nav(h){location.hash=h}
+addEventListener('hashchange',()=>{if(S.me)route()});
+let routeSeq=0;
+async function route(){
+  if(!S.me)return;
+  const seq=++routeSeq;
+  const parts=(location.hash||'').replace(/^#\/?/,'').split('/').map(decodeURIComponent);
+  $('#app').classList.remove('wide');
+  const v=parts[0],tabs=tabsFor();
+  const cur=v==='p'?(has('coordinator')?'board':has('receiver')?'inbox':'reviews'):v;
+  $('#tabs').innerHTML=tabs.map(([k,i,l])=>`<a href="#/${k}" class="${cur===k?'on':''}">${ic(i)} ${l}</a>`).join('');
+  closeDrawer();
+  try{
+    if(v==='settings'&&has('admin'))return viewSettings();
+    if(v==='new'&&has('coordinator'))return viewNew();
+    await loadPackets();if(seq!==routeSeq)return;
+    if(v==='p'&&parts[2]==='f')return viewForm(parts[1],parts[3],parts[4]);
+    if(v==='p')return viewPacket(parts[1]);
+    if(v==='board'&&has('coordinator'))return viewBoard();
+    if(v==='reviews'&&has('reviewer'))return viewReviews();
+    if(v==='inbox'&&has('receiver'))return viewInbox();
+    nav(firstRoute());
+  }catch(e){if(e.message!=='Signed out')$('#app').innerHTML=`<div class="card empty err">${esc(e.message)}</div>`}
+}
+/* refresh list views so new packets show up on tablets */
+setInterval(()=>{
+  if(!S.me||document.hidden||$('#drawer').classList.contains('open')||document.querySelector('.pinwrap,.modal'))return;
+  if(/^#\/(inbox|board|reviews)$/.test(location.hash)&&!document.activeElement?.matches('input,textarea'))route();
+},20000);
