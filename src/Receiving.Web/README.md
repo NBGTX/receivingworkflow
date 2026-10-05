@@ -32,3 +32,15 @@ Settings > Email server, then Settings > Notifications. Mail is queued in the da
 - Serve over HTTPS (IIS or Kestrel certificate). PINs travel in the request body.
 - Set Site address in Settings > General so email links point to the right server.
 - Open the firewall for the port so tablets can reach it.
+
+## Deploying to IIS
+
+From your PC: `.\deploy-src\Deploy.ps1` publishes the app, copies it to `\10.9.33.141\E$\Receiving\deploy` and runs `Install-Receiving.ps1` on the server (through a one-time Task Scheduler job), then checks the site answers. Use `-NoInstall` to copy only. The data folder (`E:\Receiving\data`) is never touched by an update.
+
+## Backups
+
+Settings > Backups. A nightly zip (database snapshot, packet PDFs, final packets, encryption keys) goes to `data\backups` or the folder you set. Restore by stopping the site and unzipping into the data folder.
+
+## Offline libraries
+
+PDF.js and Tesseract.js (with the English language file) are bundled in `wwwroot/vendor`, so the app does not need internet access.

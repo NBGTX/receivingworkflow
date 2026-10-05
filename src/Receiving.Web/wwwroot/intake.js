@@ -7,10 +7,10 @@ async function fitPage(){
   const availW=innerWidth>=1500?$('.ix').clientWidth*.62-60:st.clientWidth-24;
   scale=Math.max(.5,Math.min(4,availW/v.width,(availH-12)/v.height));
 }
-let pdf=null,pageNo=1,scale=1.5,rot={},boxes={},active=null,ocrWorker=null,curBuf=null;
+let pdf=null,pageNo=1,scale=1.5,rot={},boxes={},active=null,ocrWorker=null,curBuf=null,picks={};
 function viewNew(){
   $('#app').classList.add('wide');
-  pdf=null;boxes={};rot={};pageNo=1;active=null;curBuf=null;
+  pdf=null;boxes={};rot={};pageNo=1;active=null;curBuf=null;picks={};
   $('#app').innerHTML=`
   <div class="pagehead"><div class="grow"><h1>New packet</h1><p>Open the merged packet PDF, then click a field and drag a box around the text to fill it.</p></div></div>
   <div class="ix">
@@ -61,23 +61,40 @@ function bindDrag(ov){
     if(!drag)return;const r=ov.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
     const b={x:Math.min(x,drag.x),y:Math.min(y,drag.y),w:Math.abs(x-drag.x),h:Math.abs(y-drag.y)};drag=null;sel.remove();
     if(b.w<6||b.h<6)return;if(!active){ocrs('Click a field on the right first.',2);return}
-    (boxes[pageNo]=boxes[pageNo]||[]).push({x:b.x/scale,y:b.y/scale,w:b.w/scale,h:b.h/scale});drawBoxes();await ocr(b)});
+    (boxes[pageNo]=boxes[pageNo]||[]).push({x:b.x/scale,y:b.y/scale,w:b.w/scale,h:b.h/scale});drawBoxes();
+    const isCol=!!active.closest('tbody'),multi=$('#down').checked&&isCol,cw=$('#cv').clientWidth,ch=$('#cv').clientHeight;
+    picks[active.dataset.f]={p:pageNo,rot:rot[pageNo]||0,x:b.x/cw,y:b.y/ch,w:b.w/cw,h:b.h/ch,multi};
+    await ocr(b,multi)});
 }
-async function ocr(b){
-  try{
-    if(!ocrWorker){ocrs('Starting OCR engine (first use downloads language data)...',1);ocrWorker=await Tesseract.createWorker('eng')}
+let ocrChain=Promise.resolve();
+const ocrQ=fn=>{const p=ocrChain.then(fn,fn);ocrChain=p.then(()=>{},()=>{});return p};
+async function getWorker(){
+  if(!ocrWorker){ocrs('Starting OCR engine...',1);ocrWorker=await Tesseract.createWorker('eng',1,{workerPath:'/vendor/tesseract/worker.min.js',corePath:'/vendor/tesseract/',langPath:'/vendor/tesseract/lang',gzip:true,workerBlobURL:false})}
+  return ocrWorker;
+}
+/* read the text inside a box (css pixels on the shown page); returns a list of lines */
+function readBox(b,multi){
+  return ocrQ(async()=>{
+    const w=await getWorker();
     const src=$('#cv'),k=Math.max(1,Math.min(3,Math.ceil(90/Math.max(b.h*Q,1))));
     const c=document.createElement('canvas');c.width=b.w*Q*k;c.height=b.h*Q*k;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(src,b.x*Q,b.y*Q,b.w*Q,b.h*Q,0,0,c.width,c.height);
-    const multi=$('#down').checked&&active.closest('tbody');
-    await ocrWorker.setParameters({tessedit_pageseg_mode:multi||b.h>70?'6':'7'});ocrs('Reading...',1);
-    const {data}=await ocrWorker.recognize(c);const lines=data.text.split('\n').map(s=>s.trim()).filter(Boolean);
+    await w.setParameters({tessedit_pageseg_mode:multi||b.h>70?'6':'7'});
+    const {data}=await w.recognize(c);
+    return data.text.split('\n').map(s=>s.trim()).filter(Boolean);
+  });
+}
+async function ocr(b,multi){
+  try{
+    ocrs('Reading...',1);
+    const lines=await readBox(b,multi);
     if(!lines.length)return ocrs('No text found. Try a tighter box or type it.',2);
     if(multi)fillDown(lines);else put(active,lines.join(' '));
     ocrs('Read '+(multi?lines.length+' lines':'"'+lines.join(' ')+'"')+'. Check the value and fix it if wrong.');
   }catch(err){ocrs('OCR failed: '+err.message,2)}
 }
-function clean(f,t){if(f==='po')return t.replace(/\s+/g,'').replace(/^T[XK]?[-_ ]?/i,'TX-').replace(/[Oo](?=\d)/g,'0');if(['heat','coil','cc','bol'].includes(f))return t.replace(/\s+/g,'');if(f==='wt')return t.replace(/[^\d.,]/g,'');return t}
+function clean(f,t){if(f==='po')return t.replace(/\s+/g,'').replace(/^T[XK]?[-_ ]?/i,'TX-').replace(/[Oo](?=\d)/g,'0');if(['heat','coil','cc','bol'].includes(f))return t.replace(/\s+/g,'').replace(/^[^A-Za-z0-9.]+|[^A-Za-z0-9]+$/g,'');if(f==='wt')return t.replace(/[^\d.,]/g,'');return t}
 function put(el,t){el.value=clean(el.dataset.f,t);if($('#auto').checked){const o=$$('[data-f]'),i=o.indexOf(el);if(i<o.length-1)setActive(o[i+1])}}
+function fillColumn(f,lines){let tr=$('#rows tr');lines.forEach(t=>{if(!tr)tr=addRow();tr.querySelector(`[data-f=${f}]`).value=clean(f,t);tr=tr.nextElementSibling})}
 function fillDown(lines){const f=active.dataset.f;let tr=active.closest('tr');lines.forEach(t=>{if(!tr)tr=addRow();tr.querySelector(`[data-f=${f}]`).value=clean(f,t);tr=tr.nextElementSibling})}
 function ocrs(t,k){const o=$('#ocr');if(!o)return;o.textContent=t;o.className=k===1?'busy':k===2?'err':''}
 function addRow(v={}){const tr=document.createElement('tr');tr.innerHTML=COLS.map(c=>`<td><input data-f="${c[0]}" placeholder="${c[1]}" aria-label="${c[1]}" value="${esc(v[c[0]]||'')}"></td>`).join('')+'<td><button class="btn sm ghost" tabindex="-1" title="Remove row">&times;</button></td>';
@@ -93,6 +110,7 @@ async function saveNew(){
     $('#save').disabled=true;
     const p=await api('POST','/api/packets',{bol,vendor:$('[data-f=vendor]').value.trim(),ship:$('[data-f=ship]').value.trim(),carrier:$('[data-f=carrier]').value.trim(),rows});
     await api('POST','/api/packets/'+p.id+'/pdf',curBuf,'application/pdf');
+    const vend=$('[data-f=vendor]').value.trim();if(vend&&Object.keys(picks).length){try{await api('PUT','/api/layouts/'+encodeURIComponent(vend),{v:1,picks})}catch(e){}}
     toast('Packet sent to receivers');nav('/p/'+p.id);
   }catch(e){m.textContent=e.message;$('#save').disabled=false}
 }

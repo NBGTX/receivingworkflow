@@ -123,6 +123,7 @@ let routeSeq=0;
 async function route(){
   if(!S.me)return;
   const seq=++routeSeq;
+  if(typeof stopLock==='function')stopLock();
   const parts=(location.hash||'').replace(/^#\/?/,'').split('/').map(decodeURIComponent);
   $('#app').classList.remove('wide');
   const v=parts[0],tabs=tabsFor();

@@ -28,6 +28,10 @@ public class GeneralCfg
     public int MaxFailed { get; set; } = 5;
     public int LockMinutes { get; set; } = 5;
     public string ReviewRule { get; set; } = "all";  // all | any
+    public bool BackupEnabled { get; set; } = true;
+    public string BackupTime { get; set; } = "02:00";
+    public string BackupFolder { get; set; } = "";   // blank = data\backups
+    public int BackupKeep { get; set; } = 14;
 }
 
 public class NotifCfg

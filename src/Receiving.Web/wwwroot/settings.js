@@ -9,11 +9,11 @@ async function viewSettings(){
   drawSettings();
 }
 function drawSettings(){
-  const tabs=[['users','Users'],['admins','Admins'],['email','Email server'],['notifs','Notifications'],['general','General & security'],['outbox','Sent mail'],['audit','Audit log']];
+  const tabs=[['users','Users'],['admins','Admins'],['email','Email server'],['notifs','Notifications'],['general','General & security'],['backups','Backups'],['outbox','Sent mail'],['audit','Audit log']];
   $('#app').innerHTML=`<div class="pagehead"><div class="grow"><h1>Settings</h1><p>Admin only. Changes apply right away after you save.</p></div></div>
   <div class="stabs">${tabs.map(([k,l])=>`<button data-t="${k}" class="${STab===k?'on':''}">${l}</button>`).join('')}</div><div id="sbody"></div>`;
   $$('.stabs button').forEach(b=>b.onclick=()=>{STab=b.dataset.t;drawSettings()});
-  ({users:tabUsers,admins:tabAdmins,email:tabEmail,notifs:tabNotifs,general:tabGeneral,outbox:tabOutbox,audit:tabAudit})[STab]();
+  ({users:tabUsers,admins:tabAdmins,email:tabEmail,notifs:tabNotifs,general:tabGeneral,backups:tabBackups,outbox:tabOutbox,audit:tabAudit})[STab]();
 }
 const fld=(label,html,cls='')=>`<div class="fld ${cls}"><label>${label}</label>${html}</div>`;
 const inp=(id,val,extra='')=>`<input id="${id}" value="${esc(val??'')}" ${extra}>`;
@@ -153,4 +153,26 @@ async function tabOutbox(){
 async function tabAudit(){
   const rows=await api('GET','/api/admin/audit');
   $('#sbody').innerHTML=`<div class="card"><h2>Audit log (latest 200)</h2><table class="list"><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Detail</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${fdate(r.ts)}</td><td>${esc(r.actor)}</td><td>${esc(r.action)}</td><td>${esc(r.detail)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+/* backups */
+async function tabBackups(){
+  const g=ST.general;let info={folder:'',files:[]};
+  try{info=await api('GET','/api/admin/backups')}catch(e){}
+  $('#sbody').innerHTML=`<div class="card"><h2>Backups</h2>
+   <p class="hint" style="margin:0 0 12px">Each backup is one zip with a safe copy of the database, every packet PDF, the saved final packets and the encryption keys. Restoring means unzipping it into the data folder while the app is stopped.</p>
+   <div class="frm12">
+    <div class="fld c4"><label>Nightly backup</label><div class="checks" style="min-height:44px"><label><input type="checkbox" id="be" ${g.backupEnabled?'checked':''}> On</label></div></div>
+    ${fld('Time (24 hour)',inp('bt',g.backupTime,'type="time"'),'c2')}
+    ${fld('Keep this many backups',inp('bk',g.backupKeep,'type="number" min="1"'),'c2')}
+    ${fld('Folder (blank = data\\backups)',inp('bf',g.backupFolder,'placeholder="E:\\Backups\\Receiving"'),'c4')}
+   </div>
+   <p class="hint" style="margin-top:10px">Best to point this at a different drive or a network share, so one disk failure cannot take the data and its backups together. The app pool identity needs write access to that folder.</p></div>
+   <div class="card" style="margin-top:16px"><div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><h2 style="margin:0;flex:1">Backup files</h2><button class="btn pri" id="bnow">Back up now</button><span id="bmsg" class="tres"></span></div>
+   <p class="hint" style="margin:0 0 8px">Folder: ${esc(info.folder)}</p>
+   <table class="list"><thead><tr><th>File</th><th>Size</th><th>When</th><th></th></tr></thead><tbody>
+   ${info.files.length?info.files.map(f=>`<tr><td class="b">${esc(f.name)}</td><td>${(f.size/1048576).toFixed(1)} MB</td><td>${fdate(f.time)}</td><td style="text-align:right"><a class="btn sm" href="/api/admin/backups/${encodeURIComponent(f.name)}">${ic('dl')} Download</a></td></tr>`).join(''):'<tr><td colspan="4" class="empty">No backups yet.</td></tr>'}</tbody></table></div>${saveBar()}`;
+  [['bt','backupTime'],['bf','backupFolder']].forEach(([i,k])=>bind(i,g,k));bind('bk',g,'backupKeep',true);bind('be',g,'backupEnabled');
+  $('#saveAll').onclick=saveAll;
+  $('#bnow').onclick=async()=>{const m=$('#bmsg');m.className='tres';m.textContent='Backing up...';try{const r=await api('POST','/api/admin/backups/run',{});m.className='tres okmsg';m.textContent='Saved '+r.file;tabBackups()}catch(e){m.className='tres err';m.textContent=e.message}};
 }

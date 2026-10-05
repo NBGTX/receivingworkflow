@@ -352,3 +352,16 @@ main#app.wide .pagehead{display:none}
   .ix .fh{grid-template-columns:1fr 1fr}
   .vtool select{max-width:100%}
 }
+
+.banner{background:var(--amberbg);border:1px solid #e3b25a;border-radius:var(--r);padding:14px 18px;margin-bottom:16px;color:var(--ink)}
+.banner b{color:var(--amber)}
+
+/* intake suggestions + layouts */
+.sug{background:var(--pg);border-radius:8px;padding:10px 12px;margin:0 0 10px;font-size:13px}
+.sug.busy{color:var(--amber);background:var(--amberbg)}.sug.err{color:var(--red);background:var(--redbg)}
+.sgh{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-bottom:6px;color:var(--dg);font-weight:bold}
+.sgc{display:flex;flex-wrap:wrap;gap:6px}
+.chip.sg{cursor:pointer;border:1px dashed var(--mg);background:#fff;color:var(--mg);font-weight:normal}
+.chip.sg b{color:var(--dg);margin-left:4px}
+.chip.sg:hover{background:#eef6f0}
+.layoutbar{margin-bottom:8px}.layoutbar select{max-width:240px;min-height:34px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:0 8px}

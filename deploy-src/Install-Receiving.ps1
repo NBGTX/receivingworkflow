@@ -12,8 +12,9 @@ param(
   [string] $SourcePath = (Join-Path $PSScriptRoot 'app')
 )
 $ErrorActionPreference = 'Stop'
+try { Start-Transcript -Path (Join-Path $PSScriptRoot 'install.log') -Force | Out-Null } catch { }
 function Step($t){ Write-Host "`n== $t" -ForegroundColor Green }
-function Fail($t){ Write-Host "`nSTOPPED: $t" -ForegroundColor Red; exit 1 }
+function Fail($t){ Write-Host "`nSTOPPED: $t" -ForegroundColor Red; Write-Host "INSTALL-RESULT: FAILED"; try { Stop-Transcript | Out-Null } catch { }; exit 1 }
 
 Import-Module WebAdministration
 
@@ -85,7 +86,9 @@ try {
 } catch {
   Write-Host "The site did not answer: $($_.Exception.Message)" -ForegroundColor Red
   Write-Host "Check Event Viewer > Windows Logs > Application (source IIS AspNetCore Module V2)." -ForegroundColor Yellow
+  Write-Host "INSTALL-RESULT: FAILED"; try { Stop-Transcript | Out-Null } catch { }
   exit 1
 }
 Write-Host "`nDone. Open http://$($env:COMPUTERNAME):$Port/ , sign in with Windows as an admin, then set Settings > General > Site address and the email server." -ForegroundColor Green
-
+Write-Host "INSTALL-RESULT: OK"
+try { Stop-Transcript | Out-Null } catch { }

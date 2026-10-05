@@ -16,8 +16,8 @@
 <meta name="apple-mobile-web-app-title" content="Receiving">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="stylesheet" href="app.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="vendor/pdf.min.js"></script>
+<script src="vendor/tesseract.min.js"></script>
 </head>
 <body>
 <header class="top">
@@ -30,7 +30,7 @@
 <main id="app"></main>
 <div id="drawer"><div class="dh"><b id="dtitle">Packet</b><button class="btn sm" id="dclose">Close</button></div><div class="db" id="dbody"></div></div>
 <div class="toast" id="toast"></div>
-<script>pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'</script>
+<script>pdfjsLib.GlobalWorkerOptions.workerSrc='vendor/pdf.worker.min.js'</script>
 <script>
 /* PWA: register the service worker and offer the install button */
 if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
@@ -41,6 +41,7 @@ addEventListener('appinstalled',()=>{const b=document.getElementById('install');
 <script src="core.js"></script>
 <script src="views.js"></script>
 <script src="intake.js"></script>
+<script src="intake2.js"></script>
 <script src="settings.js"></script>
 <script>
 (async()=>{

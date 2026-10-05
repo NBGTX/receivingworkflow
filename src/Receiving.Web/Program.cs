@@ -20,6 +20,9 @@ if (OperatingSystem.IsWindows()) dp.ProtectKeysWithDpapi(protectToLocalMachine: 
 
 builder.Services.AddSingleton(new Db(Path.Combine(dataDir, "receiving.db")));
 builder.Services.AddSingleton<SettingsStore>();
+builder.Services.AddSingleton(new DataPaths(dataDir));
+builder.Services.AddSingleton<BackupService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<BackupService>());
 builder.Services.AddSingleton<Mailer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Mailer>());
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 100L * 1024 * 1024);
@@ -41,6 +44,7 @@ var app = builder.Build();
 var db = app.Services.GetRequiredService<Db>();
 var cfg = app.Services.GetRequiredService<SettingsStore>();
 var mail = app.Services.GetRequiredService<Mailer>();
+var backup = app.Services.GetRequiredService<BackupService>();
 // In-process IIS has its own Windows login; Kestrel uses the Negotiate handler.
 var underIis = app.Services.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>().GetType().Name.Contains("IIS", StringComparison.OrdinalIgnoreCase)
     || Environment.GetEnvironmentVariable("ASPNETCORE_IIS_HTTPAUTH") != null;
@@ -146,7 +150,11 @@ pk.MapGet("", (ClaimsPrincipal u, bool? all) =>
 {
     var cutoff = Now() - 60L * 86400000; var seeAll = GetMe(u)!.Has("coordinator");
     var rows = db.Query("SELECT id,bol,stage,created,updated,data FROM packets ORDER BY created DESC", r => PacketJson(r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt64(3), r.GetInt64(4), r.GetString(5)));
-    return rows.Where(p => (seeAll || !IsDraft(p)) && (all == true || p["stage"]!.GetValue<string>() != "filed" || p["updated"]!.GetValue<long>() > cutoff));
+    var shown = rows.Where(p => (seeAll || !IsDraft(p)) && (all == true || p["stage"]!.GetValue<string>() != "filed" || p["updated"]!.GetValue<long>() > cutoff)).ToList();
+    var live = db.Query("SELECT k,name FROM locks WHERE expires>$0", r => (k: r.GetString(0), name: r.GetString(1)), Now());
+    foreach (var p in shown)
+        p["locks"] = new JsonArray(live.Where(l => l.k.StartsWith(p["id"]!.GetValue<string>() + "|")).Select(l => (JsonNode)new JsonObject { ["k"] = l.k, ["name"] = l.name }).ToArray());
+    return shown;
 });
 
 pk.MapGet("/{id}", (string id, ClaimsPrincipal u) => LoadPacket(id) is { } p && (GetMe(u)!.Has("coordinator") || !IsDraft(p.Data)) ? Results.Ok(p.ToJson()) : Results.NotFound());
@@ -229,10 +237,13 @@ pk.MapPut("/{id}/forms/{po}/{type}", (string id, string po, string type, ClaimsP
     if (p.Stage is not ("new" or "inspecting")) return Results.Conflict(new { error = "Packet is past inspection." });
     var forms = p.Data["forms"]!.AsObject(); var key = po + "|" + type;
     if (forms[key] is JsonObject old && old["submitted"]?.GetValue<bool>() == true) return Results.Conflict(new { error = "Already submitted. Reopen to edit." });
+    var (lockOk, holder) = TryLock(id + "|" + key, me);
+    if (!lockOk) return Results.Conflict(new { error = $"{holder} has this form open. You can't save over their work.", holder });
     var submit = body["submit"]?.GetValue<bool>() == true;
     forms[key] = new JsonObject { ["submitted"] = submit, ["date"] = Str(body, "date"), ["inspector"] = me.Initials, ["by"] = me.Name, ["items"] = JsonNode.Parse(body["items"]?.ToJsonString() ?? "[]") };
     if (submit)
     {
+        db.Exec("DELETE FROM locks WHERE k=$0", id + "|" + key);
         if (p.Stage == "new") p.Stage = "inspecting";
         AddLog(p.Data, me.Initials, $"Submitted {TypeName(type)} inspection for {po}");
     }
@@ -349,6 +360,117 @@ pk.MapPost("/{id}/reviewers", (string id, ClaimsPrincipal u, HttpContext c, Json
     return Results.Ok(p.ToJson());
 });
 
+
+/* ---------------- form locks, claims, overrides ---------------- */
+const long LockMs = 3 * 60 * 1000;   // a form stays reserved for 3 minutes after its last heartbeat
+(bool ok, string? holder) TryLock(string k, Me me)
+{
+    var now = Now();
+    var rows = db.Query("SELECT user_id,name,expires FROM locks WHERE k=$0", r => (uid: r.GetString(0), name: r.GetString(1), exp: r.GetInt64(2)), k);
+    if (rows.Count > 0 && rows[0].exp > now && rows[0].uid != me.Id) return (false, rows[0].name);
+    db.Exec("INSERT INTO locks(k,user_id,name,expires) VALUES($0,$1,$2,$3) ON CONFLICT(k) DO UPDATE SET user_id=excluded.user_id,name=excluded.name,expires=excluded.expires", k, me.Id, me.Name, now + LockMs);
+    return (true, null);
+}
+
+pk.MapPost("/{id}/forms/{po}/{type}/lock", (string id, string po, string type, ClaimsPrincipal u) =>
+{
+    var me = GetMe(u)!; if (!me.Has("receiver", "coordinator")) return Results.Forbid();
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage is not ("new" or "inspecting")) return Results.Conflict(new { error = "Packet is past inspection." });
+    if (p.Data["forms"]![po + "|" + type]?["submitted"]?.GetValue<bool>() == true) return Results.Ok(new { ok = true, readOnly = true });
+    var (ok, holder) = TryLock(id + "|" + po + "|" + type, me);
+    if (!ok) return Results.Conflict(new { error = $"{holder} is working on this form.", holder });
+    if (p.Data["claimedBy"] == null && me.Roles.Contains("receiver"))
+    {
+        p.Data["claimedBy"] = new JsonObject { ["id"] = me.Id, ["name"] = me.Name, ["t"] = Now() };
+        AddLog(p.Data, me.Name, "Claimed this packet"); p.Save();
+    }
+    return Results.Ok(new { ok = true });
+});
+
+pk.MapPost("/{id}/forms/{po}/{type}/unlock", (string id, string po, string type, ClaimsPrincipal u, JsonObject? body) =>
+{
+    var me = GetMe(u)!; var k = id + "|" + po + "|" + type;
+    var force = body?["force"]?.GetValue<bool>() == true && me.Has("coordinator");
+    if (force) { db.Exec("DELETE FROM locks WHERE k=$0", k); db.Audit(me.Name, "lock_released", k); }
+    else db.Exec("DELETE FROM locks WHERE k=$0 AND user_id=$1", k, me.Id);
+    return Results.Ok();
+});
+
+pk.MapPost("/{id}/claim", (string id, ClaimsPrincipal u) =>
+{
+    var me = GetMe(u)!; if (!me.Has("receiver", "coordinator")) return Results.Forbid();
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage is not ("new" or "inspecting")) return Results.Conflict(new { error = "Packet is past inspection." });
+    if (p.Data["claimedBy"] is JsonObject cur && Str(cur, "id") != me.Id) return Results.Conflict(new { error = $"{Str(cur, "name")} already claimed this packet." });
+    p.Data["claimedBy"] = new JsonObject { ["id"] = me.Id, ["name"] = me.Name, ["t"] = Now() };
+    AddLog(p.Data, me.Name, "Claimed this packet"); p.Save();
+    return Results.Ok(p.ToJson());
+});
+
+pk.MapPost("/{id}/unclaim", (string id, ClaimsPrincipal u) =>
+{
+    var me = GetMe(u)!;
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Data["claimedBy"] is JsonObject cur)
+    {
+        if (Str(cur, "id") != me.Id && !me.Has("coordinator")) return Results.Forbid();
+        p.Data.Remove("claimedBy"); AddLog(p.Data, me.Name, "Released the claim on this packet"); p.Save();
+    }
+    return Results.Ok(p.ToJson());
+});
+
+// reviewer is out: intake can move the packet on, with a reason on the record
+pk.MapPost("/{id}/skip-review", (string id, ClaimsPrincipal u, HttpContext c, JsonObject body) =>
+{
+    var me = GetMe(u)!; if (!me.Has("coordinator")) return Results.Forbid();
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage != "review") return Results.Conflict(new { error = "Packet is not in review." });
+    var reason = Str(body, "reason").Trim(); if (reason == "") return Results.BadRequest(new { error = "Give a reason." });
+    p.Stage = "receive"; AddLog(p.Data, me.Name, "Review skipped: " + reason); p.Save();
+    db.Audit(me.Name, "review_skipped", p.Bol + ": " + reason);
+    Notify("review_complete", p, me.Name, Origin(c));
+    return Results.Ok(p.ToJson());
+});
+
+// a filed packet can be unlocked: it goes back to "ready to authorize" and the saved final packet is discarded
+pk.MapPost("/{id}/reopen", (string id, ClaimsPrincipal u, JsonObject body) =>
+{
+    var me = GetMe(u)!; if (!me.Has("coordinator")) return Results.Forbid();
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage != "filed") return Results.Conflict(new { error = "Only a filed packet can be reopened." });
+    var reason = Str(body, "reason").Trim(); if (reason == "") return Results.BadRequest(new { error = "Give a reason." });
+    p.Stage = "authorize"; p.Data.Remove("authBy"); p.Data.Remove("authAt");
+    AddLog(p.Data, me.Name, "Reopened: " + reason); p.Save();
+    if (File.Exists(FinalPath(id))) File.Delete(FinalPath(id));
+    db.Audit(me.Name, "packet_reopened", p.Bol + ": " + reason);
+    return Results.Ok(p.ToJson());
+});
+
+pk.MapDelete("/{id}", (string id, ClaimsPrincipal u) =>
+{
+    var me = GetMe(u)!; if (!me.Has("coordinator")) return Results.Forbid();
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage == "filed") return Results.Conflict(new { error = "Reopen a filed packet before deleting it." });
+    var untouched = IsDraft(p.Data) || (p.Stage == "new" && !(p.Data["forms"] is JsonObject f && f.Count > 0));
+    if (!untouched && !me.Admin) return Results.Conflict(new { error = "Only an admin can delete a packet that already has inspections." });
+    DeleteOne(id); db.Audit(me.Name, "packet_deleted", p.Bol);
+    return Results.Ok();
+});
+
+/* ---- saved layouts: where the fields sit on a vendor's BOL ---- */
+var lay = api.MapGroup("/layouts").RequireAuthorization();
+lay.MapGet("", (ClaimsPrincipal u) => GetMe(u)!.Has("coordinator") ? Results.Ok(db.Query("SELECT name,updated FROM layouts ORDER BY name", r => new { name = r.GetString(0), updated = r.GetInt64(1) })) : Results.Forbid());
+lay.MapGet("/{name}", (string name, ClaimsPrincipal u) => !GetMe(u)!.Has("coordinator") ? Results.Forbid() : db.One("SELECT data FROM layouts WHERE name=$0", r => r.GetString(0), name) is { } d ? Results.Content(d, "application/json") : Results.NotFound());
+lay.MapPut("/{name}", (string name, ClaimsPrincipal u, JsonObject body) =>
+{
+    if (!GetMe(u)!.Has("coordinator")) return Results.Forbid();
+    if (string.IsNullOrWhiteSpace(name)) return Results.BadRequest(new { error = "Name is required." });
+    db.Exec("INSERT INTO layouts(name,data,updated) VALUES($0,$1,$2) ON CONFLICT(name) DO UPDATE SET data=excluded.data,updated=excluded.updated", name.Trim(), body.ToJsonString(), Now());
+    return Results.Ok();
+});
+lay.MapDelete("/{name}", (string name, ClaimsPrincipal u) => { if (!GetMe(u)!.Has("coordinator")) return Results.Forbid(); db.Exec("DELETE FROM layouts WHERE name=$0", name); return Results.Ok(); });
+
 /* ---------------- admin ---------------- */
 var ad = api.MapGroup("/admin").RequireAuthorization("Admin");
 
@@ -426,6 +548,13 @@ ad.MapPost("/test-email", async (ClaimsPrincipal u, HttpContext c, JsonObject bo
     db.Audit(me.Name, "test_emails", $"{to} sent={sent.Count} failed={failed.Count}");
     return failed.Count > 0 && sent.Count == 0 ? Results.BadRequest(new { error = failed[0] }) : Results.Ok(new { sent = sent.Count, failed });
 });
+ad.MapGet("/backups", () => backup.List());
+ad.MapPost("/backups/run", (ClaimsPrincipal u) =>
+{
+    try { var f = backup.Run(); db.Audit(GetMe(u)!.Name, "backup", Path.GetFileName(f)); return Results.Ok(new { file = Path.GetFileName(f) }); }
+    catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+ad.MapGet("/backups/{name}", (string name) => backup.Open(name) is { } fs ? Results.File(fs, "application/zip", Path.GetFileName(name)) : Results.NotFound());
 ad.MapGet("/notif-defaults", () => SettingsStore.DefaultNotifs());
 ad.MapPost("/preview-email", (HttpContext c, JsonObject body) =>
 {
@@ -435,16 +564,18 @@ ad.MapPost("/preview-email", (HttpContext c, JsonObject body) =>
     var (subject, _, html) = Compose(evt, n, d, "1929915", "review", "sample", GetMe(c.User)!.Name, Origin(c), true);
     return Results.Ok(new { subject, html });
 });
+void DeleteOne(string id)
+{
+    var f = Path.Combine(dataDir, "pdfs", Path.GetFileName(id) + ".pdf"); if (File.Exists(f)) File.Delete(f);
+    var ff = Path.Combine(dataDir, "final", Path.GetFileName(id) + ".pdf"); if (File.Exists(ff)) File.Delete(ff);
+    db.Exec("DELETE FROM outbox WHERE packet_id=$0", id);
+    db.Exec("DELETE FROM locks WHERE k LIKE $0", id + "|%");
+    db.Exec("DELETE FROM packets WHERE id=$0", id);
+}
 int DeletePackets(string where)
 {
     var ids = db.Query("SELECT id FROM packets WHERE " + where, r => r.GetString(0));
-    foreach (var id in ids)
-    {
-        var f = Path.Combine(dataDir, "pdfs", Path.GetFileName(id) + ".pdf"); if (File.Exists(f)) File.Delete(f);
-        var ff = Path.Combine(dataDir, "final", Path.GetFileName(id) + ".pdf"); if (File.Exists(ff)) File.Delete(ff);
-        db.Exec("DELETE FROM outbox WHERE packet_id=$0", id);
-        db.Exec("DELETE FROM packets WHERE id=$0", id);
-    }
+    foreach (var id in ids) DeleteOne(id);
     return ids.Count;
 }
 ad.MapPost("/clear-demo", (ClaimsPrincipal u) =>
@@ -669,7 +800,9 @@ class PacketRec(Db db, string id, string bol, string stage, long created, JsonOb
     public JsonObject ToJson()
     {
         var o = JsonNode.Parse(Data.ToJsonString())!.AsObject();
-        o["id"] = Id; o["bol"] = Bol; o["stage"] = Stage; o["created"] = Created; return o;
+        o["id"] = Id; o["bol"] = Bol; o["stage"] = Stage; o["created"] = Created;
+        o["locks"] = new JsonArray(db.Query("SELECT k,name FROM locks WHERE k LIKE $0 AND expires>$1", r => (JsonNode)new JsonObject { ["k"] = r.GetString(0), ["name"] = r.GetString(1) }, Id + "|%", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()).ToArray());
+        return o;
     }
 }
 
