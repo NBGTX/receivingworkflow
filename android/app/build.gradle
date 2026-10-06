@@ -17,7 +17,7 @@ android {
         buildConfigField 'String', 'SERVER_URL', "\"${project.findProperty('serverUrl') ?: 'http://10.9.33.141:8091/'}\""
         // PIN for the hidden server-address box (press and hold the top-left corner for 3 seconds).
         // Intune can set "admin_pin" instead. Build another with -PadminPin=1234
-        buildConfigField 'String', 'ADMIN_PIN', "\"${project.findProperty('adminPin') ?: '2580'}\""
+        buildConfigField 'String', 'ADMIN_PIN', "\"${project.findProperty('adminPin') ?: '5407'}\""
     }
 
     buildFeatures { buildConfig true }
@@ -35,6 +35,8 @@ android {
 }
 
 dependencies {
+    // pins every Kotlin library to one version; without it two libraries pull in different ones and the build reports duplicate classes
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.core:core:1.13.0'
 }
