@@ -448,3 +448,7 @@ input.warnfld{border-color:#e3b25a !important;background:var(--amberbg) !importa
 .ttabs.stack{flex-direction:column !important}.ttabs.stack .ttcol{flex:none !important;width:100%}
 .ttab th{white-space:normal !important;line-height:1.15}
 .ttab td,.ttab th{padding-left:.3em !important;padding-right:.3em !important}
+
+.abtns{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
+.abtns .btn{min-height:50px;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none !important;font-weight:bold;font-size:15px;padding:0 20px}
+.abtns .btn *{text-decoration:none}
