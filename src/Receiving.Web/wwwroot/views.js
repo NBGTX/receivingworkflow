@@ -122,14 +122,14 @@ function cell([k,l,kind],it,ro){
   return `<div class="fld"><label>${l}</label><input data-k="${k}" ${kind==='text'?'':'inputmode="decimal"'} value="${esc(it[k]||'')}" ${ro}></div>`;
 }
 async function openTol(T){
-  $('#dtitle').textContent=T.n+' tolerance tables';$('#drawer').classList.add('open');
+  $('#dtitle').textContent=T.n+' tolerance tables';$('#drawer').classList.add('open','wide');
   const body=$('#dbody');
   if(!T.tol){body.innerHTML='<div class="card empty">The paper '+esc(T.n)+' sheet ('+T.form+') has no tolerance tables.</div>';return}
   body.innerHTML='<div class="card empty">Loading...</div>';
   try{
     const r=await fetch('/tolerances/'+T.tol+'.pdf');if(!r.ok)throw new Error('Not found');
     const doc=await pdfjsLib.getDocument({data:await r.arrayBuffer()}).promise;const pg=await doc.getPage(1);
-    const vp=pg.getViewport({scale:2});const full=document.createElement('canvas');full.width=vp.width;full.height=vp.height;
+    const vp=pg.getViewport({scale:3});const full=document.createElement('canvas');full.width=vp.width;full.height=vp.height;
     await pg.render({canvasContext:full.getContext('2d'),viewport:vp}).promise;
     const y0=Math.floor(full.height*T.tolRegion[0]),y1=Math.floor(full.height*T.tolRegion[1]);
     const c=document.createElement('canvas');c.width=full.width;c.height=y1-y0;c.getContext('2d').drawImage(full,0,y0,full.width,y1-y0,0,0,full.width,y1-y0);
@@ -158,7 +158,7 @@ async function viewForm(id,po,tk){
     <div class="fld"><label>PO #</label><input value="${esc(po)}" readonly></div><div class="fld"><label>BOL #</label><input value="${esc(p.bol)}" readonly></div>
     <div class="fld"><label>Vendor</label><input value="${esc(p.vendor)}" readonly></div><div class="fld"><label>Date</label><input type="date" id="fdate" value="${esc(f.date||'')}" ${ro}></div>
     <div class="fld"><label>Inspector</label><input value="${esc(f.submitted?f.inspector:S.me.initials)}" readonly></div></div>
-    <button class="tol" type="button" id="tol">${ic('info')} ${T.tol?'Tolerance tables':'Sheet '+T.form} for ${T.n.toLowerCase()} <span style="margin-left:auto;font-weight:normal">${T.tol?'tap to open':'no tolerance tables on this sheet'}</span></button></div>
+    ${T.tol?`<button class="tol" type="button" id="tol">${ic('info')} Tolerance tables for ${T.n.toLowerCase()} <span style="margin-left:auto;font-weight:normal">tap to open</span></button>`:''}</div>
   <div id="items"></div>
   ${canEdit?`<div class="addbar"><button class="btn big" id="addrow">${ic('plus')} Add blank row</button><button class="btn big" id="addrest" title="Adds one row for each line on the BOL that is not in this inspection yet, already filled with its heat, description and CC #">${ic('plus')} Add rows from BOL</button><span class="muted">Add rows from BOL: one row per BOL line not yet inspected, pre-filled.</span></div>`:''}
   <div class="sticky"><button class="btn big" id="cancel">${canEdit?'Save draft':'Back'}</button><span class="muted" id="saved"></span><span style="flex:1"></span>
@@ -196,7 +196,7 @@ async function viewForm(id,po,tk){
   $('#back').onclick=async()=>{if(canEdit){clearTimeout(t);try{await push(false)}catch(e){}}nav('/p/'+id)};
   const fl=$('#forcelock');if(fl)fl.onclick=async()=>{try{await api('POST',lockUrl(id,po,tk)+'/unlock',{force:true});toast('Lock released');viewForm(id,po,tk)}catch(e){toast(e.message,1)}};
   const vp=$('#viewpdf');if(vp)vp.onclick=()=>openPdf(p);
-  $('#tol').onclick=()=>openTol(T);
+  const tb=$('#tol');if(tb)tb.onclick=()=>openTol(T);
   if(canEdit){
     $('#addrow').onclick=()=>{collect();f.items.push({});draw();autosave();const last=$$('#items .item').pop();last&&last.scrollIntoView({behavior:'smooth',block:'center'})};
     $('#addrest').onclick=()=>{collect();const u=used();
@@ -216,11 +216,11 @@ async function viewForm(id,po,tk){
 }
 
 /* ---- drawers ---- */
-function closeDrawer(){$('#drawer').classList.remove('open')}
+function closeDrawer(){$('#drawer').classList.remove('open','wide')}
 $('#dclose').onclick=closeDrawer;
-function openText(title,txt){$('#dtitle').textContent=title;$('#dbody').innerHTML=`<div class="card empty">${esc(txt)}</div>`;$('#drawer').classList.add('open')}
+function openText(title,txt){$('#dtitle').textContent=title;$('#dbody').innerHTML=`<div class="card empty">${esc(txt)}</div>`;$('#drawer').classList.remove('wide');$('#drawer').classList.add('open')}
 async function openPdf(p){
-  $('#dtitle').textContent='BOL '+p.bol+' packet';$('#drawer').classList.add('open');
+  $('#dtitle').textContent='BOL '+p.bol+' packet';$('#drawer').classList.remove('wide');$('#drawer').classList.add('open');
   const body=$('#dbody');body.innerHTML='<div class="card empty">Loading...</div>';
   try{
     const r=await fetch('/api/packets/'+p.id+'/pdf',{credentials:'same-origin'});if(!r.ok)throw new Error('No PDF ('+r.status+')');

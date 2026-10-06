@@ -410,3 +410,7 @@ input.warnfld{border-color:#e3b25a !important;background:var(--amberbg) !importa
 .addbar{align-items:stretch}.addbar .btn{flex:0 0 240px;justify-content:center;text-align:center;font-size:16px}.addbar .muted{flex:1 1 100%;font-size:13px;margin-top:-4px}
 .addph{width:110px !important;justify-content:center !important;align-items:center !important;text-align:center;text-transform:uppercase;letter-spacing:.3px;font-weight:bold;border-style:dashed !important}
 .addph{border:1.5px dashed #9aa59f !important;background:#fff;border-radius:8px;cursor:pointer}
+#drawer.wide{width:min(98vw,2000px)}
+#drawer.wide .db{padding:8px}
+#drawer.wide .pg{width:100%;margin:0 0 10px}
+#drawer.wide .pg canvas{width:100%;height:auto}
