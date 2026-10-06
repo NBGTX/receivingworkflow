@@ -60,7 +60,7 @@ function resetIdle(){clearTimeout(idleT);if(!S.me)return;idleT=setTimeout(()=>lo
 ['pointerdown','keydown','touchstart'].forEach(e=>addEventListener(e,resetIdle,{passive:true}));
 async function logout(msg){try{await api('POST','/api/auth/logout')}catch(e){}S.me=null;S.packets=[];clearTimeout(idleT);showLogin(msg)}
 async function showLogin(msg){
-  $('#tabs').innerHTML='';$('#who').innerHTML='';closeDrawer&&closeDrawer();
+  $('#tabs').innerHTML='';$('#tabs2').innerHTML='';$('#who').innerHTML='';closeDrawer&&closeDrawer();
   $('#app').innerHTML=`<div class="login"><h1>Who is working?</h1><p>${esc(msg||'Tap your card, then enter your PIN.')}</p><div class="ucards" id="ucards"></div>
    <div class="adminlink"><button class="btn" id="winbtn">${ic('stamp')} Admin sign-in (Windows)</button><p class="hint" id="winerr" style="margin-top:10px"></p></div></div>`;
   $('#winbtn').onclick=winLogin;
@@ -131,7 +131,7 @@ function badgeCount(k){
 }
 function renderTabs(){
   if(!S.me)return;
-  const html=([k,i,l])=>{const n=badgeCount(k);return `<a href="#/${k}" class="${k==='inbox'?'inbox ':''}${curTab===k?'on':''}">${ic(i)} ${l}${n?`<span class="pill-n" title="${n} waiting">${n}</span>`:''}</a>`};
+  const html=([k,i,l])=>{const n=badgeCount(k);return `<a href="#/${k}" title="${l}" class="${k==='inbox'?'inbox ':''}${curTab===k?'on':''}">${ic(i)}<span class="tl">${l}</span>${n?`<span class="pill-n" title="${n} waiting">${n}</span>`:''}</a>`};
   const all=tabsFor();
   $('#tabs').innerHTML=all.filter(t=>t[0]!=='inbox').map(html).join('');
   $('#tabs2').innerHTML=all.filter(t=>t[0]==='inbox').map(html).join('');

@@ -26,7 +26,7 @@ function viewNew(){
      <div><label>BOL #</label><input data-f="bol"></div><div><label>Vendor</label><input data-f="vendor"></div>
      <div><label>Ship date</label><input data-f="ship"></div><div><label>Carrier</label><input data-f="carrier"></div></div>
     <div class="tw"><table class="cells"><colgroup><col style="width:12%"><col style="width:11%"><col style="width:14%"><col style="width:11%"><col style="width:27%"><col style="width:10%"><col style="width:10%"><col style="width:5%"></colgroup><thead><tr id="thead">${COLS.map(c=>`<th data-c="${c[0]}">${c[1]}</th>`).join('')}<th></th></tr></thead><tbody id="rows"></tbody></table></div>
-    <div class="vtool" style="margin-top:12px"><button class="btn sm" id="addRow">${ic('plus')} Add row</button><span style="flex:1"></span><button class="btn pri" id="save">Save and send to receivers</button></div>
+    <div class="vtool" style="margin-top:12px"><button class="btn" id="addRow">${ic('plus')} Add row</button><span style="flex:1"></span><button class="btn pri" id="save">Save and send to receivers</button></div>
     <p class="muted" id="msg" style="margin:6px 0 0;font-size:13px"></p></div>
   </div>`;
   const ov=$('#ov');
