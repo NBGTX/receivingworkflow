@@ -67,9 +67,6 @@ try {
   # (everything else uses 440), so IIS has no reason to send PIN users a Windows challenge.
   Set-WebConfigurationProperty -Filter '/system.webServer/security/authentication/anonymousAuthentication' -Name enabled -Value $true -PSPath 'IIS:\' -Location $SiteName
   Set-WebConfigurationProperty -Filter '/system.webServer/security/authentication/windowsAuthentication'   -Name enabled -Value $true -PSPath 'IIS:\' -Location $SiteName
-  # an earlier version set a per-URL override that made IIS answer 404 for the admin sign-in address; remove it if it is there
-  try { Clear-WebConfiguration -Filter '/system.webServer/security/authentication/windowsAuthentication'   -PSPath 'IIS:\' -Location "$SiteName/api/auth/windows" } catch { }
-  try { Clear-WebConfiguration -Filter '/system.webServer/security/authentication/anonymousAuthentication' -PSPath 'IIS:\' -Location "$SiteName/api/auth/windows" } catch { }
   Write-Host "Site: anonymous + Windows authentication on; the app only challenges on /api/auth/windows"
 } catch {
   Write-Host "Could not set authentication from script: $($_.Exception.Message)" -ForegroundColor Yellow
