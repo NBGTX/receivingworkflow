@@ -170,8 +170,8 @@ async function viewForm(id,po,tk){
     <div class="ih"><span class="n">${i+1}</span><span class="t">${esc(it.cc?'CC # '+it.cc:'New row')}</span><span class="s">${esc([it.heat&&'Heat '+it.heat,it.desc,(it.src!==undefined&&it.src!==''&&rs[+it.src]?.len)||''].filter(Boolean).join(' · '))}</span><span style="flex:1"></span>
     ${canEdit?`<select data-k="src"><option value="">Fill from packet item...</option>${rs.map((r,j)=>`<option value="${j}" ${String(it.src)===String(j)?'selected':''}>${esc(label(r))}${u.has(String(j))&&String(it.src)!==String(j)?' (added)':''}</option>`).join('')}</select>`:''}
     ${canEdit&&f.items.length>1?`<button class="btn sm" data-rm="${i}">Remove</button>`:''}</div>
-    <div class="ib">${ident.map(([k,l])=>`<div class="fld"><label>${l}</label><input data-k="${k}" value="${esc(it[k]||'')}" ${ro}></div>`).join('')}
-    ${T.meas.map(m=>cell(m,it,ro)).join('')}
+    <div class="ib"><div class="ida ${T.k==='coil'?'c4':'c3'}">${ident.map(([k,l])=>`<div class="fld"><label>${l}</label><input data-k="${k}" value="${esc(it[k]||'')}" ${ro}></div>`).join('')}</div>
+    <div class="meas">${T.meas.map(m=>cell(m,it,ro)).join('')}</div>
      <div class="fld" style="grid-column:1/-1"><label>Comments</label><input data-k="comments" value="${esc(it.comments||'')}" ${ro}></div>
      ${(T.post||[]).map(m=>cell(m,it,ro)).join('')}</div></div>`};
 
