@@ -16,19 +16,21 @@ const TOLTAB={
   {title:'Pipe thickness',head:['Pipe','Min.','Max.'],rows:[['6 5/8 x 0.188','0.169','0.206'],['8 5/8 x 0.188','0.169','0.206'],['10 3/4 x 0.219','0.189','0.206'],['10 3/4 x 0.250','0.225','0.275'],['10 3/4 x 0.365','0.329','0.402']],note:'Pipe O.D.: +/- 0.5%. Thickness: +/- 10%.'},
   {title:'Rod diameter',head:['Rod size','Rod','Order dia.','Min.','Max.','Round'],rows:[['5/8','RD0625','0.5615','0.555','0.569','0.010'],['3/4','RD0750','0.6800','0.672','0.688','0.012'],['7/8','RD0875','0.7970','0.789','0.805','0.012'],['1','RD1000','0.9060','0.897','0.915','0.013'],['1 1/8','RD1125','1.0260','1.016','1.036','0.015'],['1 1/4','RD1250','1.1511','1.140','1.162','0.016']]}]
 };
+const TOLLAY={coil:[[[0,2],1],[[1],1.7]],bar:[[[0],1],[[1],1],[[2],1]],tube:[[[0],1],[[1],1.3]],sheet:[[[0],1]]};   // [[cards in this column], width weight]
 function tolTablesHtml(key){
   const tabs=TOLTAB[key];if(!tabs)return '';
   const tbl=(t,rows)=>`<table><thead><tr>${t.head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
-  return tabs.map(t=>{
+  const card=t=>{
     const half=t.rows.length>14?Math.ceil(t.rows.length/2):0;   // long lists go side by side
     const body=half?`<div class="ttsplit">${tbl(t,t.rows.slice(0,half))}${tbl(t,t.rows.slice(half))}</div>`:tbl(t,t.rows);
     return `<section class="ttab"><h3>${esc(t.title)}</h3>${body}${t.note?`<p class="tnote">${esc(t.note)}</p>`:''}</section>`;
-  }).join('');
+  };
+  return (TOLLAY[key]||[[tabs.map((_,i)=>i),1]]).map(([ids,w])=>`<div class="ttcol" style="flex:${w} 1 0">${ids.map(i=>card(tabs[i])).join('')}</div>`).join('');
 }
 /* make everything fit the screen: shrink the type until nothing scrolls */
 function fitTol(){
   const db=document.querySelector('#dbody'),box=db&&db.querySelector('.ttabs');if(!box)return;
-  let px=26;box.style.setProperty('--tf',px+'px');
+  box.classList.toggle('stack',db.clientWidth<600);let px=34;box.style.setProperty('--tf',px+'px');
   while(px>9&&(db.scrollHeight>db.clientHeight+1||db.scrollWidth>db.clientWidth+1)){px--;box.style.setProperty('--tf',px+'px')}
 }
 addEventListener('resize',()=>{if(document.querySelector('#drawer.open.wide .ttabs'))fitTol()});

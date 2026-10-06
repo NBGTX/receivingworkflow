@@ -438,3 +438,13 @@ input.warnfld{border-color:#e3b25a !important;background:var(--amberbg) !importa
 .tnote{font-size:.7em !important;margin:.5em 0 0}
 .tfoot{break-before:avoid;font-size:.55em !important}
 .ttabs{columns:auto 340px !important}
+
+.ttabs{columns:auto !important;display:flex !important;flex-direction:row;gap:14px;align-items:flex-start;width:100%}
+.ttcol{display:flex;flex-direction:column;gap:14px;min-width:0}
+.ttab{margin:0 !important;width:100%}
+.ttab td,.ttab th{white-space:nowrap}
+.ttab td:first-child{text-align:left}
+.tfoot{display:none}
+.ttabs.stack{flex-direction:column !important}.ttabs.stack .ttcol{flex:none !important;width:100%}
+.ttab th{white-space:normal !important;line-height:1.15}
+.ttab td,.ttab th{padding-left:.3em !important;padding-right:.3em !important}
