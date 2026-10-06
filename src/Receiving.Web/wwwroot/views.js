@@ -173,7 +173,7 @@ async function viewForm(id,po,tk){
     <div class="ib"><div class="ida ${T.k==='coil'?'c4':'c3'}">${ident.map(([k,l])=>`<div class="fld"><label>${l}</label><input data-k="${k}" value="${esc(it[k]||'')}" ${ro}></div>`).join('')}</div>
     <div class="meas">${T.meas.filter(m=>m[2]!=='ok').map(m=>cell(m,it,ro)).join('')}</div>
     <div class="oks">${[...T.meas.filter(m=>m[2]==='ok'),...(T.post||[])].map(m=>cell(m,it,ro)).join('')}</div>
-     <div class="fld" style="grid-column:1/-1"><label>Comments</label><input data-k="comments" value="${esc(it.comments||'')}" ${ro}></div></div></div>`};
+     <div class="fld" style="grid-column:1/-1"><label>Comments</label><textarea data-k="comments" rows="4" ${ro}>${esc(it.comments||'')}</textarea></div></div></div>`};
 
   const collect=()=>{f.date=$('#fdate').value;$$('#items .item').forEach(c=>{const it=f.items[+c.dataset.i];$$('[data-k]',c).forEach(i=>it[i.dataset.k]=i.value)})};
   const push=async(submit)=>{collect();const r=await api('PUT',`/api/packets/${id}/forms/${encodeURIComponent(po)}/${tk}`,{date:f.date,items:f.items,submit});upsert(r)};
