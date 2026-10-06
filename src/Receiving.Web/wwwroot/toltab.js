@@ -18,5 +18,17 @@ const TOLTAB={
 };
 function tolTablesHtml(key){
   const tabs=TOLTAB[key];if(!tabs)return '';
-  return tabs.map(t=>`<section class="ttab"><h3>${esc(t.title)}</h3><div class="ttw"><table><thead><tr>${t.head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${t.rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>${t.note?`<p class="tnote">${esc(t.note)}</p>`:''}</section>`).join('');
+  const tbl=(t,rows)=>`<table><thead><tr>${t.head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  return tabs.map(t=>{
+    const half=t.rows.length>14?Math.ceil(t.rows.length/2):0;   // long lists go side by side
+    const body=half?`<div class="ttsplit">${tbl(t,t.rows.slice(0,half))}${tbl(t,t.rows.slice(half))}</div>`:tbl(t,t.rows);
+    return `<section class="ttab"><h3>${esc(t.title)}</h3>${body}${t.note?`<p class="tnote">${esc(t.note)}</p>`:''}</section>`;
+  }).join('');
 }
+/* make everything fit the screen: shrink the type until nothing scrolls */
+function fitTol(){
+  const db=document.querySelector('#dbody'),box=db&&db.querySelector('.ttabs');if(!box)return;
+  let px=26;box.style.setProperty('--tf',px+'px');
+  while(px>9&&(db.scrollHeight>db.clientHeight+1||db.scrollWidth>db.clientWidth+1)){px--;box.style.setProperty('--tf',px+'px')}
+}
+addEventListener('resize',()=>{if(document.querySelector('#drawer.open.wide .ttabs'))fitTol()});

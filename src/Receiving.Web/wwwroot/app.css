@@ -427,3 +427,14 @@ input.warnfld{border-color:#e3b25a !important;background:var(--amberbg) !importa
 .tnote{margin:10px 0 0;font-size:16px;color:var(--mute)}
 .tfoot{text-align:center;color:#fff;font-size:14px;margin:0}
 @media(max-width:700px){.ttab table{font-size:17px}.ttab th{font-size:12px}}
+
+.ttabs{max-width:none !important;display:block !important;columns:auto 420px;column-gap:14px;font-size:var(--tf,20px)}
+.ttab{break-inside:avoid;margin:0 0 14px;padding:.6em .8em}
+.ttab h3{font-size:1.05em !important;margin:0 0 .4em !important}
+.ttab table{font-size:1em !important;margin:0}
+.ttab th{font-size:.7em !important;padding:.35em .5em !important}
+.ttab td{padding:.3em .5em !important}
+.ttsplit{display:flex;gap:.8em}.ttsplit table{flex:1}
+.tnote{font-size:.7em !important;margin:.5em 0 0}
+.tfoot{break-before:avoid;font-size:.55em !important}
+.ttabs{columns:auto 340px !important}
