@@ -397,3 +397,5 @@ input.warnfld{border-color:#e3b25a !important;background:var(--amberbg) !importa
 .tabs2 a.inbox .pill-n{background:var(--dg);color:#fff}
 .tabs a{white-space:nowrap}
 @media(max-width:1500px){.tabs a{padding:0 12px;gap:6px}.tabs2 a.inbox{padding:0 12px 0 14px}}
+
+.addbar{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:0 0 14px}.addbar .btn.big{min-height:56px}
