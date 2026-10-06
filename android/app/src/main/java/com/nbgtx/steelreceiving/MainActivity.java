@@ -275,9 +275,7 @@ public class MainActivity extends AppCompatActivity {
     private void askServer() {
         if (managed("server_url") != null) {
             new AlertDialog.Builder(this).setTitle("Server address")
-                .setMessage("This tablet's server address is set by your administrator (Intune):
-
-" + serverUrl)
+                .setMessage("This tablet's server address is set by your administrator (Intune):\n\n" + serverUrl)
                 .setPositiveButton("OK", null).show();
             return;
         }
