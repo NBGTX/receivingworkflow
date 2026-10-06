@@ -38,7 +38,7 @@ try {
   Write-Host "`nSign-in and access"
   $adm = $null
   Check 'config answers without sign-in' { (Invoke-WebRequest "$BaseUrl/api/config" -UseBasicParsing).StatusCode -eq 200 }
-  Check 'packets refuse an anonymous caller' { (Status (Call $null GET '/api/packets')) -eq 401 }
+  Check 'packets refuse an anonymous caller (440, never a Windows challenge)' { (Status (Call $null GET '/api/packets')) -eq 440 }
   Check 'Windows admin sign-in' { Invoke-WebRequest "$BaseUrl/api/auth/windows" -UseDefaultCredentials -SessionVariable s -UseBasicParsing | Out-Null; $script:adm = $s; $true }
   $null = Call $adm POST '/api/admin/seed-demo' @{}
   Check 'demo data loads (5 packets)' { @(Call $adm GET '/api/packets').Count -ge 5 -or (@(Call $adm GET '/api/packets?all=true' | ForEach-Object { $_ }).Count -ge 5) }
@@ -49,7 +49,7 @@ try {
   $null = Call $adm POST '/api/admin/users' @{ name = 'Smoke Reviewer'; roles = @('reviewer'); pin = '7373' }
   $cards = Call $adm GET '/api/auth/cards'
   function Login($name, $pin) { $s = New-Object Microsoft.PowerShell.Commands.WebRequestSession; $id = ($cards | Where-Object { $_.name -eq $name }).id; $r = Call $s POST '/api/auth/pin' @{ userId = $id; pin = $pin }; if (Failed $r) { return $null }; $s }
-  Check 'wrong PIN is refused' { $id = ($cards | Where-Object { $_.name -eq 'Smoke Receiver' }).id; (Status (Call (New-Object Microsoft.PowerShell.Commands.WebRequestSession) POST '/api/auth/pin' @{ userId = $id; pin = '0000' })) -eq 401 }
+  Check 'wrong PIN is refused' { $id = ($cards | Where-Object { $_.name -eq 'Smoke Receiver' }).id; (Status (Call (New-Object Microsoft.PowerShell.Commands.WebRequestSession) POST '/api/auth/pin' @{ userId = $id; pin = '0000' })) -eq 403 }
   $r1 = Login 'Smoke Receiver' '5151'; $r2 = Login 'Smoke Receiver B' '6262'; $rv = Login 'Smoke Reviewer' '7373'; $rd = Login 'Demo Reviewer' '4444'
   Check 'correct PINs sign in' { $r1 -and $r2 -and $rv }
 

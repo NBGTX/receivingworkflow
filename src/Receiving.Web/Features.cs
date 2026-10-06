@@ -104,7 +104,7 @@ internal static class Features
 
         /* ---------------- duplicate BOL check ---------------- */
         api.MapGet("/packets/exists", (string bol, ClaimsPrincipal u) =>
-            x.GetMe(u) == null ? Results.Unauthorized() : Results.Ok(new { exists = db.Query("SELECT 1 FROM packets WHERE bol=$0", r => 1, bol.Trim()).Count > 0 })).RequireAuthorization();
+            x.GetMe(u) == null ? Results.Json(new { error = "Not signed in" }, statusCode: 440) : Results.Ok(new { exists = db.Query("SELECT 1 FROM packets WHERE bol=$0", r => 1, bol.Trim()).Count > 0 })).RequireAuthorization();
 
         /* ---------------- audit search ---------------- */
         ad.MapGet("/audit", (string? q, string? actor, string? action) =>

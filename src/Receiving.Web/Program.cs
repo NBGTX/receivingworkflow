@@ -30,15 +30,17 @@ builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 100L * 1024 
 // IIS must not sign people in on its own: only our cookie counts, and Windows login runs only on /api/auth/windows.
 builder.Services.Configure<IISServerOptions>(o => { o.MaxRequestBodySize = 100L * 1024 * 1024; o.AutomaticAuthentication = false; });
 
-builder.Services.AddAuthentication(o => { o.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme; o.DefaultAuthenticateScheme = CookieAuthenticationDefaults.AuthenticationScheme; o.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme; })
+var auth = builder.Services.AddAuthentication(o => { o.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme; o.DefaultAuthenticateScheme = CookieAuthenticationDefaults.AuthenticationScheme; o.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme; })
     .AddCookie(o =>
     {
         o.Cookie.Name = "nbs.auth"; o.Cookie.HttpOnly = true; o.Cookie.SameSite = SameSiteMode.Strict;
         o.ExpireTimeSpan = TimeSpan.FromHours(12);
-        o.Events.OnRedirectToLogin = c => { c.Response.StatusCode = 401; return Task.CompletedTask; };
+        o.Events.OnRedirectToLogin = c => { c.Response.StatusCode = 440; return Task.CompletedTask; };
         o.Events.OnRedirectToAccessDenied = c => { c.Response.StatusCode = 403; return Task.CompletedTask; };
-    })
-    .AddNegotiate();
+    });
+// Under IIS the server does Windows login itself (only enabled on /api/auth/windows). The Negotiate handler is for running without IIS,
+// and it refuses to start when IIS has Windows authentication switched off at the site level.
+if (Environment.GetEnvironmentVariable("ASPNETCORE_IIS_PHYSICAL_PATH") == null) auth.AddNegotiate();
 builder.Services.AddAuthorization(o => o.AddPolicy("Admin", p => p.RequireRole("admin")));
 
 var app = builder.Build();
@@ -93,21 +95,22 @@ api.MapGet("/config", () => { var g = cfg.General(); return new { g.SiteName, g.
 api.MapGet("/auth/cards", () => db.Query("SELECT id,name,initials,roles FROM users WHERE active=1 AND pin_hash IS NOT NULL ORDER BY name",
     r => new { id = r.GetInt64(0), name = r.GetString(1), initials = r.GetString(2), roles = r.GetString(3).Split(',', StringSplitOptions.RemoveEmptyEntries) }));
 
-api.MapGet("/auth/me", (ClaimsPrincipal u) => GetMe(u) is { } m ? Results.Ok(MeJson(m)) : Results.Unauthorized());
+// 440 ("login time-out") instead of 401: IIS adds a Windows challenge to every 401, which makes browsers ask PIN users for a Windows password.
+api.MapGet("/auth/me", (ClaimsPrincipal u) => GetMe(u) is { } m ? Results.Ok(MeJson(m)) : Results.Json(new { error = "Not signed in" }, statusCode: 440));
 
 api.MapPost("/auth/pin", async (HttpContext c, PinReq req) =>
 {
     var g = cfg.General();
     var u = db.One("SELECT id,name,initials,roles,pin_hash,pin_salt,active,failed,locked_until,must_change FROM users WHERE id=$0",
         r => new { Id = r.GetInt64(0), Name = r.GetString(1), Ini = r.GetString(2), Roles = r.GetString(3), H = r.IsDBNull(4) ? null : r.GetString(4), S = r.IsDBNull(5) ? null : r.GetString(5), Act = r.GetInt32(6) == 1, Fail = r.GetInt32(7), Lock = r.GetInt64(8), Must = r.GetInt32(9) == 1 }, req.UserId);
-    if (u == null || !u.Act) return Results.Json(new { error = "Unknown user" }, statusCode: 401);
+    if (u == null || !u.Act) return Results.Json(new { error = "Unknown user" }, statusCode: 403);
     if (u.Lock > Now()) return Results.Json(new { error = $"Locked. Try again in {Math.Ceiling((u.Lock - Now()) / 60000.0)} min or ask an admin." }, statusCode: 423);
     if (!Pin.Check(req.Pin ?? "", u.H, u.S))
     {
         var f = u.Fail + 1; var lockTo = f >= g.MaxFailed ? Now() + g.LockMinutes * 60000L : 0;
         db.Exec("UPDATE users SET failed=$1, locked_until=$2 WHERE id=$0", u.Id, lockTo == 0 ? f : 0, lockTo);
         db.Audit(u.Name, lockTo > 0 ? "pin_locked" : "pin_fail", $"attempt {f}");
-        return Results.Json(new { error = lockTo > 0 ? $"Too many tries. Locked for {g.LockMinutes} min." : "Wrong PIN" }, statusCode: 401);
+        return Results.Json(new { error = lockTo > 0 ? $"Too many tries. Locked for {g.LockMinutes} min." : "Wrong PIN" }, statusCode: 403);
     }
     db.Exec("UPDATE users SET failed=0, locked_until=0 WHERE id=$0", u.Id);
     var me = new Me("pin", u.Id.ToString(), u.Name, u.Ini, u.Roles.Split(',', StringSplitOptions.RemoveEmptyEntries), u.Must);
@@ -159,7 +162,7 @@ api.MapGet("/auth/windows", async (HttpContext c) =>
 
 api.MapPost("/auth/change-pin", async (HttpContext c, ChangePinReq req) =>
 {
-    var me = GetMe(c.User); if (me == null || me.Kind != "pin") return Results.Unauthorized();
+    var me = GetMe(c.User); if (me == null || me.Kind != "pin") return Results.Json(new { error = "Not signed in" }, statusCode: 440);
     var len = cfg.General().PinLength;
     if (string.IsNullOrEmpty(req.New) || req.New.Length != len || !req.New.All(char.IsDigit)) return Results.BadRequest(new { error = $"New PIN must be {len} digits." });
     var row = db.One("SELECT pin_hash,pin_salt FROM users WHERE id=$0", r => new { H = r.IsDBNull(0) ? null : r.GetString(0), S = r.IsDBNull(1) ? null : r.GetString(1) }, long.Parse(me.Id));

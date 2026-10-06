@@ -40,7 +40,7 @@ async function api(method,url,body,ctype){
   if(body instanceof ArrayBuffer){b=body;h['Content-Type']=ctype||'application/octet-stream'}
   else if(body!==undefined){b=JSON.stringify(body);h['Content-Type']='application/json'}
   const r=await fetch(url,{method,headers:h,body:b,credentials:'same-origin'});
-  if(r.status===401&&!url.includes('/auth/')){S.me=null;showLogin();throw new Error('Signed out')}
+  if(r.status===440&&!url.includes('/auth/')){S.me=null;showLogin();throw new Error('Signed out')}
   let j=null;const t=await r.text();try{j=t?JSON.parse(t):null}catch(e){}
   if(!r.ok)throw new Error((j&&(j.error||j.title))||('Request failed ('+r.status+')'));
   return j;
