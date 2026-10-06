@@ -125,6 +125,7 @@ async function openTol(T){
   $('#dtitle').textContent=T.n+' tolerance tables';$('#drawer').classList.add('open','wide');
   const body=$('#dbody');
   if(!T.tol){body.innerHTML='<div class="card empty">The paper '+esc(T.n)+' sheet ('+T.form+') has no tolerance tables.</div>';return}
+  if(typeof TOLTAB!=='undefined'&&TOLTAB[T.tol]){body.innerHTML=`<div class="ttabs">${tolTablesHtml(T.tol)}<p class="tfoot">From paper sheet ${esc(T.form)}. Advisory only.</p></div>`;return}
   body.innerHTML='<div class="card empty">Loading...</div>';
   try{
     const r=await fetch('/tolerances/'+T.tol+'.pdf');if(!r.ok)throw new Error('Not found');
