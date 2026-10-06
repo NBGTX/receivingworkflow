@@ -11,20 +11,25 @@ function bindCards(){$$('.pk').forEach(c=>c.onclick=()=>nav('/p/'+c.dataset.id))
 
 let inboxF='todo';
 // receiver home: packets to inspect, mine, submitted
+let inboxQ='';
 function viewInbox(){
   const open=S.packets.filter(p=>p.stage==='new'||p.stage==='inspecting');
   const mine=open.filter(p=>p.claimedBy&&p.claimedBy.id===S.me.id);
   const done=S.packets.filter(p=>p.stage!=='new'&&p.stage!=='inspecting');
-  const base=inboxF==='todo'?open:inboxF==='mine'?mine:done;
+  const q=inboxQ.trim().toLowerCase(),searching=q.length>0;
+  const base=searching?S.packets.filter(p=>p.rows.some(r=>[r.heat,r.cc,r.coil,r.po].some(v=>String(v||'').toLowerCase().includes(q)))||[p.bol,p.vendor].some(v=>String(v||'').toLowerCase().includes(q))):inboxF==='todo'?open:inboxF==='mine'?mine:done;
+  const hitNote=p=>{const m=p.rows.filter(r=>[r.heat,r.cc,r.coil].some(v=>String(v||'').toLowerCase().includes(q)));return m.length?m.slice(0,3).map(r=>'CC '+r.cc+' \u00b7 heat '+r.heat).join('  |  ')+(m.length>3?'  +'+(m.length-3)+' more':''):''};
   const list=base.slice().sort((a,b)=>{
     if(inboxF==='todo'){const am=a.claimedBy&&a.claimedBy.id===S.me.id?0:1,bm=b.claimedBy&&b.claimedBy.id===S.me.id?0:1;if(am!==bm)return am-bm;return a.created-b.created}
     return inboxF==='mine'?a.created-b.created:b.created-a.created});
   $('#app').innerHTML=`
   <div class="pagehead"><div class="grow"><h1>My inbox</h1><p>Packets waiting for inspection on the dock. Open one to start, or claim it so the others know it is yours.</p></div></div>
   ${howTo('inbox')}
-  <div class="filters"><button class="pill ${inboxF==='todo'?'on':''}" data-f="todo">To inspect <i>${open.length}</i></button><button class="pill ${inboxF==='mine'?'on':''}" data-f="mine">Mine <i>${mine.length}</i></button><button class="pill ${inboxF==='done'?'on':''}" data-f="done">Submitted <i>${done.length}</i></button></div>
-  ${list.length?`<div class="cards">${list.map(p=>pkCard(p)).join('')}</div>`:`<div class="card empty">${inboxF==='done'?'No submitted packets.':inboxF==='mine'?'You have not claimed any packets.':'Nothing to inspect right now.'}</div>`}`;
-  $$('.pill[data-f]').forEach(b=>b.onclick=()=>{inboxF=b.dataset.f;viewInbox()});bindCards();
+  <div class="filters"><input id="iq" class="isearch" type="search" placeholder="Find by heat, CC #, BOL or PO" value="${esc(inboxQ)}" autocomplete="off"><button class="pill ${!searching&&inboxF==='todo'?'on':''}" data-f="todo">To inspect <i>${open.length}</i></button><button class="pill ${!searching&&inboxF==='mine'?'on':''}" data-f="mine">Mine <i>${mine.length}</i></button><button class="pill ${!searching&&inboxF==='done'?'on':''}" data-f="done">Submitted <i>${done.length}</i></button></div>
+  ${searching&&list.length?`<p class="muted" style="margin:0 0 10px">${list.length} packet${list.length===1?'':'s'} match \u201c${esc(inboxQ.trim())}\u201d</p>`:''}
+  ${list.length?`<div class="cards">${list.map(p=>pkCard(p,searching?hitNote(p):undefined)).join('')}</div>`:`<div class="card empty">${searching?'No packet has that heat, CC #, BOL or PO.':inboxF==='done'?'No submitted packets.':inboxF==='mine'?'You have not claimed any packets.':'Nothing to inspect right now.'}</div>`}`;
+  $$('.pill[data-f]').forEach(b=>b.onclick=()=>{inboxF=b.dataset.f;inboxQ='';viewInbox()});bindCards();
+  $('#iq').oninput=e=>{inboxQ=e.target.value;const at=e.target.selectionStart;viewInbox();const i=$('#iq');i.focus();i.setSelectionRange(at,at)};
 }
 
 // reviewer queue

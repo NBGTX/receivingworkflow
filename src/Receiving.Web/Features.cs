@@ -113,6 +113,25 @@ internal static class Features
         api.MapGet("/packets/exists", (string bol, ClaimsPrincipal u) =>
             x.GetMe(u) == null ? Results.Json(new { error = "Not signed in" }, statusCode: 440) : Results.Ok(new { exists = db.Query("SELECT 1 FROM packets WHERE bol=$0", r => 1, bol.Trim()).Count > 0 })).RequireAuthorization();
 
+        /* ---------------- heats already received on other packets ---------------- */
+        // intake asks this while rows are typed; the same heat on two BOLs can be a split shipment, so it only warns
+        api.MapGet("/packets/heats", (string list, string? exclude, ClaimsPrincipal u) =>
+        {
+            if (x.GetMe(u) == null) return Results.Json(new { error = "Not signed in" }, statusCode: 440);
+            var want = list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(h => h.ToUpperInvariant()).ToHashSet();
+            var hits = new Dictionary<string, List<object>>();
+            foreach (var (id, bol, created, data) in db.Query("SELECT id,bol,created,data FROM packets", r => (r.GetString(0), r.GetString(1), r.GetInt64(2), r.GetString(3))))
+            {
+                if (id == exclude || JsonNode.Parse(data) is not JsonObject d || d["rows"] is not JsonArray rows) continue;
+                foreach (var h in rows.Select(rw => S(rw!.AsObject(), "heat").Trim().ToUpperInvariant()).Where(want.Contains).Distinct())
+                {
+                    if (!hits.TryGetValue(h, out var l)) hits[h] = l = new List<object>();
+                    l.Add(new { bol, id, created });
+                }
+            }
+            return Results.Ok(hits.Select(kv => new { heat = kv.Key, packets = kv.Value }));
+        }).RequireAuthorization();
+
         /* ---------------- audit search ---------------- */
         ad.MapGet("/audit", (string? q, string? actor, string? action) =>
         {

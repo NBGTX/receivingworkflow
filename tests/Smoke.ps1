@@ -61,6 +61,9 @@ try {
   $pdf = [IO.File]::ReadAllBytes((Join-Path $repo 'Inspections\Beam, Channel, and Angle Inspection Sheet.pdf'))
   Check 'PDF upload makes it visible to receivers' { Invoke-WebRequest "$BaseUrl/api/packets/$($new.id)/pdf" -Method POST -Headers $h -ContentType 'application/pdf' -Body $pdf -WebSession $adm -UseBasicParsing | Out-Null; [bool]((Call $r1 GET '/api/packets') | Where-Object { $_.bol -eq 'SMOKE-1' }) }
 
+  Check 'config carries the version for the footer' { $c = Call $null GET '/api/config'; [bool]$c.version }
+  Check 'heat already on another packet is reported' { $h = @(Call $adm GET '/api/packets/heats?list=H100'); $h.Count -ge 1 -and $h[0].packets[0].bol -eq 'SMOKE-1' }
+  Check 'a packet does not warn about its own heat' { @(Call $adm GET "/api/packets/heats?list=H100&exclude=$($new.id)" | Where-Object { $_ }).Count -eq 0 }
   Write-Host "`nInspection"
   $id = $new.id; $f = "/api/packets/$id/forms/TX-9000001/shape"
   Check 'receiver can open the form' { (Call $r1 POST "$f/lock" @{}).ok }

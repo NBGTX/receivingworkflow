@@ -150,10 +150,22 @@ function extraChecks(){
   const bol=$('[data-f=bol]');bol.parentElement.insertAdjacentHTML('beforeend','<div class="hint err" id="bolw" style="margin:4px 0 0"></div>');
   const chk=async()=>{const v=bol.value.trim(),w=$('#bolw');if(!w)return;if(!v){w.textContent='';return}try{const r=await api('GET','/api/packets/exists?bol='+encodeURIComponent(v));w.textContent=r.exists?'BOL '+v+' is already in the system.':''}catch(e){}};
   bol.addEventListener('change',chk);bol.addEventListener('blur',chk);
-  $('.tw').insertAdjacentHTML('afterend','<div id="pow"></div>');
-  let t=null;const soon=()=>{clearTimeout(t);t=setTimeout(checkPos,700)};
-  $('#rows').addEventListener('input',e=>{if(e.target.dataset.f==='po')soon()});
+  $('.tw').insertAdjacentHTML('afterend','<div id="pow"></div><div id="hdw"></div>');
+  let t=null;const soon=()=>{clearTimeout(t);t=setTimeout(()=>{checkPos();checkDupes()},700)};
+  $('#rows').addEventListener('input',e=>{if(e.target.dataset.f==='po'||e.target.dataset.f==='heat')soon()});
   new MutationObserver(soon).observe($('#rows'),{childList:true});
+}
+let dupHeats=[];
+// warn when a typed heat is already on another packet (can be a split shipment, so it only warns)
+async function checkDupes(){
+  const box=$('#hdw');if(!box)return;
+  const heats=[...new Set($$('#rows [data-f=heat]').map(i=>i.value.trim()).filter(h=>h.length>=3))];
+  if(!heats.length){box.innerHTML='';dupHeats=[];return}
+  try{
+    const r=await api('GET','/api/packets/heats?list='+encodeURIComponent(heats.join(',')));
+    dupHeats=r.map(x=>x.heat+' (BOL '+x.packets.map(p=>p.bol).join(', ')+')');
+    box.innerHTML=r.length?'<div class="sgc" style="margin-top:8px">'+r.map(x=>`<span class="chip bad">Heat ${esc(x.heat)} is already on BOL ${x.packets.map(p=>esc(p.bol)).join(', ')}</span>`).join('')+'</div><p class="hint" style="margin:6px 0 0">The same heat on another packet can be right for a split shipment. Check the BOL numbers before saving.</p>':'';
+  }catch(e){}
 }
 // compare typed POs with the imported PO list
 async function checkPos(){
@@ -169,6 +181,7 @@ async function checkPos(){
 }
 const _saveNew=saveNew;
 saveNew=async function(){
+  if(dupHeats.length&&!confirm('These heats are already on other packets:\n\n'+dupHeats.join('\n')+'\n\nSave the packet anyway?'))return;
   if(poMissing.length&&!confirm('These POs are not on the PO list from D365:\n\n'+poMissing.join(', ')+'\n\nSave the packet anyway?'))return;
   const rowsBefore=$$('#rows tr').map(tr=>{const o={};$$('input',tr).forEach(i=>o[i.dataset.f]=i.value.trim());return o}).filter(r=>r.po);
   const vend=$('[data-f=vendor]')?.value.trim(),sug=SUG;

@@ -154,5 +154,13 @@ function bindChecklist(){
   document.querySelectorAll('[data-gotab]').forEach(b=>b.onclick=()=>{const t=document.querySelector('.stabs button[data-t="'+b.dataset.gotab+'"]');if(t)t.click()});
 }
 
+/* ---------- page footer: which build is this tablet looking at? ---------- */
+function renderFoot(){
+  const el=document.getElementById('appfoot');if(!el||!S.cfg)return;
+  const c=S.cfg,app=/SteelReceivingApp\/([\w.]+)/.exec(navigator.userAgent);
+  const built=c.built?new Date(c.built).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+  el.textContent=[(c.siteName||'Steel Receiving')+(c.version?' v'+c.version:''),c.build?'build '+c.build.replace(/^([0-9a-f]{7})[0-9a-f]+/,'$1'):'',built?'deployed '+built:'',app?'Android app '+app[1]:'browser'].filter(Boolean).join(' \u00b7 ');
+}
+
 /* first paint of the header pill once the page is ready */
 renderSync();

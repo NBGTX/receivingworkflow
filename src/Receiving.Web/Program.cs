@@ -93,7 +93,12 @@ string[] AllRoles = ["receiver", "coordinator", "reviewer"];
 var api = app.MapGroup("/api");
 
 /* ---------------- config + auth ---------------- */
-api.MapGet("/config", () => { var g = cfg.General(); return new { g.SiteName, g.IdleMinutes, g.PinLength }; });
+// version and build are shown in the page footer so you can tell which build a tablet is looking at
+var asm = typeof(Program).Assembly;
+var info = (asm.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).FirstOrDefault() as System.Reflection.AssemblyInformationalVersionAttribute)?.InformationalVersion ?? "";
+var verParts = info.Split('+', 2);
+var builtAt = File.GetLastWriteTimeUtc(asm.Location);
+api.MapGet("/config", () => { var g = cfg.General(); return new { g.SiteName, g.IdleMinutes, g.PinLength, version = verParts[0], build = verParts.Length > 1 ? verParts[1] : "", built = new DateTimeOffset(builtAt).ToUnixTimeMilliseconds() }; });
 
 api.MapGet("/auth/cards", () => db.Query("SELECT id,name,initials,roles FROM users WHERE active=1 AND pin_hash IS NOT NULL ORDER BY name",
     r => new { id = r.GetInt64(0), name = r.GetString(1), initials = r.GetString(2), roles = r.GetString(3).Split(',', StringSplitOptions.RemoveEmptyEntries) }));

@@ -87,6 +87,7 @@ function idleWarn(){
 async function logout(msg){try{await api('POST','/api/auth/logout')}catch(e){}S.me=null;S.packets=[];clearTimeout(idleT);showLogin(msg)}
 // card picker plus the Windows admin link
 async function showLogin(msg){
+  if(typeof renderFoot==='function')renderFoot();
   $('#tabs').innerHTML='';$('#tabs2').innerHTML='';$('#who').innerHTML='';closeDrawer&&closeDrawer();
   $('#app').innerHTML=`<div class="login"><h1>Who is working?</h1><p>${esc(msg||'Tap your card, then enter your PIN.')}</p><div class="ucards" id="ucards"></div>
    ${howTo('login')}<div class="adminlink"><button class="btn" id="winbtn">${ic('stamp')} Admin sign-in (Windows)</button><p class="hint" id="winerr" style="margin-top:10px"></p></div></div>`;
@@ -172,6 +173,7 @@ addEventListener('hashchange',()=>{if(S.me)route()});
 let routeSeq=0;
 // hash router: picks the view for the current address
 async function route(){
+  if(typeof renderFoot==='function')renderFoot();
   if(!S.me)return;
   if(typeof syncAll==='function')syncAll();
   const seq=++routeSeq;

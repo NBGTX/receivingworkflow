@@ -29,7 +29,9 @@ $target = "\\$Server\$Share\" + ($RemoteDir -replace '^[A-Za-z]:\\','')
 
 if (-not $SkipPublish) {
   Step "Publishing"
-  dotnet publish $proj -c Release -o (Join-Path $out 'app') --nologo | Out-Null
+  # the short commit id (plus -dirty when files are uncommitted) shows in the page footer
+  $rev = (& git -C $repo rev-parse --short HEAD 2>$null); if ($rev -and (& git -C $repo status --porcelain 2>$null)) { $rev += '-dirty' }
+  dotnet publish $proj -c Release -o (Join-Path $out 'app') --nologo "-p:SourceRevisionId=$rev" | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
   Copy-Item (Join-Path $PSScriptRoot 'Install-Receiving.ps1') $out -Force
 }
