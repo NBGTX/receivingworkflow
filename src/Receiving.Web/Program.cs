@@ -283,6 +283,15 @@ pk.MapPut("/{id}/forms/{po}/{type}", (string id, string po, string type, ClaimsP
     var (lockOk, holder) = TryLock(id + "|" + key, me);
     if (!lockOk) return Results.Conflict(new { error = $"{holder} has this form open. You can't save over their work.", holder });
     var submit = body["submit"]?.GetValue<bool>() == true;
+    // opening a form by mistake must not leave a "draft" behind: an empty form, or one the receiver discards, is removed
+    static bool Blank(JsonNode? items) => items is not JsonArray a || a.All(i => i is not JsonObject o || o.All(kv => kv.Key is "src" or "skip" || kv.Value == null || (kv.Value is JsonArray arr ? arr.Count == 0 : string.IsNullOrWhiteSpace(kv.Value.ToString()))));
+    if (!submit && (body["discard"]?.GetValue<bool>() == true || Blank(body["items"])))
+    {
+        var had = forms.ContainsKey(key); forms.Remove(key);
+        if (had) AddLog(p.Data, me.Initials, $"Discarded {TypeName(type)} draft for {po}");
+        p.Save();
+        return Results.Ok(p.ToJson());
+    }
     forms[key] = new JsonObject { ["submitted"] = submit, ["date"] = Str(body, "date"), ["inspector"] = me.Initials, ["by"] = me.Name, ["items"] = JsonNode.Parse(body["items"]?.ToJsonString() ?? "[]") };
     if (submit)
     {

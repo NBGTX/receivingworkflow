@@ -162,7 +162,7 @@ async function viewForm(id,po,tk){
     ${T.tol?`<button class="tol" type="button" id="tol">${ic('info')} Tolerance tables for ${T.n.toLowerCase()} <span style="margin-left:auto;font-weight:normal">tap to open</span></button>`:''}</div>
   <div id="items"></div>
   ${canEdit?`<div class="addbar"><button class="btn big" id="addrow">${ic('plus')} Add blank row</button><button class="btn big" id="addrest" title="Adds one row for each line on the BOL that is not in this inspection yet, already filled with its heat, description and CC #">${ic('plus')} Add rows from BOL</button><span class="muted">Add rows from BOL: one row per BOL line not yet inspected, pre-filled.</span></div>`:''}
-  <div class="sticky"><button class="btn big" id="cancel">${canEdit?'Save draft':'Back'}</button><span class="muted" id="saved"></span><span style="flex:1"></span>
+  <div class="sticky"><button class="btn big" id="cancel">${canEdit?'Save draft':'Back'}</button>${canEdit?`<button class="btn big danger" id="discard">Discard</button>`:''}<span class="muted" id="saved"></span><span style="flex:1"></span>
    ${canEdit?`<button class="btn pri big" id="submit">${ic('check')} Submit inspection</button>`:(f.submitted&&(p.stage==='new'||p.stage==='inspecting')&&has('receiver','coordinator')?'<button class="btn big" id="reopen">Reopen to edit</button>':'')}</div>`;
 
   const itemHtml=(it,i)=>{
@@ -207,6 +207,10 @@ async function viewForm(id,po,tk){
       rest.forEach(([r,j])=>f.items.push(fromRow(r,{src:String(j)})));
       draw();autosave()};
     $('#cancel').onclick=async()=>{clearTimeout(t);try{await push(false);toast('Draft saved');nav('/p/'+id)}catch(e){toast(e.message,1)}};
+    $('#discard').onclick=async()=>{clearTimeout(t);collect();
+      const has=f.items.some(it=>Object.entries(it).some(([k,v])=>k!=='src'&&k!=='skip'&&(Array.isArray(v)?v.length:String(v||'').trim())));
+      if(has&&!confirm('Throw away everything entered on this inspection? The form goes back to Start inspection.'))return;
+      try{upsert(await api('PUT',`/api/packets/${id}/forms/${encodeURIComponent(po)}/${tk}`,{date:f.date,items:f.items,submit:false,discard:true}));toast('Discarded');nav('/p/'+id)}catch(e){toast(e.message,1)}};
     $('#submit').onclick=async()=>{clearTimeout(t);try{collect();
       if(!f.items.some(it=>it.heat||it.cc||it.desc))return toast('Fill in at least one row',1);
       await push(true);toast('Inspection submitted');nav('/p/'+id)}catch(e){toast(e.message,1)}};

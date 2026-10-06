@@ -66,6 +66,9 @@ try {
   Check 'receiver can open the form' { (Call $r1 POST "$f/lock" @{}).ok }
   Check 'second receiver is blocked while it is open' { (Status (Call $r2 POST "$f/lock" @{})) -eq 409 }
   Check 'second receiver cannot save over it' { (Status (Call $r2 PUT $f @{ date = '2026-10-05'; items = @(@{}); submit = $false })) -eq 409 }
+  Check 'opening a form and leaving it blank leaves no draft' { $x = Call $r1 PUT $f @{ date = '2026-10-05'; items = @(@{}); submit = $false }; $x.forms.PSObject.Properties.Name -notcontains 'TX-9000001|shape' }
+  Check 'a form with entries is kept as a draft' { $x = Call $r1 PUT $f @{ date = '2026-10-05'; items = @(@{ heat = 'H1' }); submit = $false }; $x.forms.PSObject.Properties.Name -contains 'TX-9000001|shape' }
+  Check 'discard removes the draft' { $x = Call $r1 PUT $f @{ date = '2026-10-05'; items = @(@{ heat = 'H1' }); submit = $false; discard = $true }; $x.forms.PSObject.Properties.Name -notcontains 'TX-9000001|shape' }
   Check 'first receiver submits (one reject)' { $x = Call $r1 PUT $f @{ date = '2026-10-05'; items = @(@{ heat = 'H100'; cc = '900001'; desc = 'W12x30'; qty = '6'; visual = 'bad'; cert = 'ok' }); submit = $true }; $x.stage -eq 'inspecting' }
   Check 'reject is logged' { @((Call $adm GET "/api/packets/$id").log | Where-Object { $_.what -like '*rejected*' }).Count -ge 1 }
   Check 'complete moves it to review' { (Call $r1 POST "/api/packets/$id/complete" @{}).stage -eq 'review' }
