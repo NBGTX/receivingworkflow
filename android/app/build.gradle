@@ -1,0 +1,37 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.nbgtx.steelreceiving'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.nbgtx.steelreceiving'
+        minSdk 26            // Android 8; the tablets run Android 10
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+        // Address of the server. Intune can override it per device with the managed app setting "server_url".
+        // Build another address in with:  gradlew assembleRelease -PserverUrl=http://host:port/
+        buildConfigField 'String', 'SERVER_URL', "\"${project.findProperty('serverUrl') ?: 'http://10.9.33.141:8091/'}\""
+    }
+
+    buildFeatures { buildConfig true }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Signing: use Build > Generate Signed Bundle / APK in Android Studio, or add a signingConfig here.
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.core:core:1.13.0'
+}

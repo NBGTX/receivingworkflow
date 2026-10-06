@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Steel Receiving</string>
+    <string name="restriction_server_url">Server address</string>
+    <string name="restriction_server_url_desc">Full address of the Steel Receiving server, for example http://10.9.33.141:8091/</string>
+</resources>
