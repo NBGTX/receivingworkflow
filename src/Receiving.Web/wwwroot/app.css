@@ -405,3 +405,4 @@ input.warnfld{border-color:#e3b25a !important;background:var(--amberbg) !importa
 @media(max-width:700px){.item .ida,.item .ida.c4{grid-template-columns:1fr 1fr}.item .ida .fld:nth-child(2){grid-column:1/-1}}
 .item .oks{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:14px}.item .oks:empty{display:none}
 .item .oks .toggle{width:240px;min-height:56px}.item .oks .toggle button{flex:1 1 50%;padding:0;font-size:17px}.item .oks .fld{flex:0 0 auto}.item .ib>.fld textarea[data-k=comments]{min-height:110px;resize:vertical}
+.toggle button+button{border-left:1.5px solid #c9c7be}.toggle button:not(.on):hover{background:#f1f0ea}
