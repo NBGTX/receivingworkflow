@@ -123,7 +123,10 @@ function tabGeneral(){
    <p class="hint">Changing PIN length only affects PINs set after the change. Existing PINs keep working until reset.</p></div>
    <div class="card" style="margin-top:16px"><h2>Demo data</h2><p class="hint" style="margin:0 0 12px">Load five sample packets: three from your real scanned PDFs (Arkansas coils, Berkeley beams, Delta tube and beams) and two built-in ones that use every inspection sheet type (coil, flat sheet, flat bar, beam, tube). Also adds four demo users (Receiver One, Receiver Two, Demo Coordinator, Demo Reviewer). Loading only works while there are no packets.</p>
    <div class="bar" style="margin:0"><button class="btn" id="seed">Load demo data</button><button class="btn" id="clrdemo">Clear demo data</button><button class="btn danger" id="clrall">Delete ALL packets</button></div>
-   <p class="hint" style="margin:10px 0 0"><b>Clear demo data</b> removes only the sample packets and demo users. <b>Delete ALL packets</b> removes every packet, including ones you made, and cannot be undone. Users and settings are kept.</p><p id="seedmsg" class="muted" style="margin:8px 0 0"></p></div>${saveBar()}`;
+   <p class="hint" style="margin:10px 0 0"><b>Clear demo data</b> removes only the sample packets and demo users. <b>Delete ALL packets</b> removes every packet, including ones you made, and cannot be undone. Users and settings are kept.</p><p id="seedmsg" class="muted" style="margin:8px 0 0"></p></div>
+   <div class="card" style="margin-top:16px;border:2px solid #a32428"><h2 style="color:#a32428">Scorched earth</h2>
+   <p class="hint" style="margin:0 0 12px">Wipes the whole system back to empty: every packet, every PIN user, all history, every stored PDF, final packet and photo. Admins and the settings on these tabs are kept. There is no undo.</p>
+   <div class="bar" style="margin:0"><button class="btn danger" id="scorch">Scorched earth...</button></div></div>${saveBar()}`;
   const demoCall=async(path,label,confirmText)=>{
     if(confirmText&&!confirm(confirmText))return;
     const m=$('#seedmsg');m.className='muted';m.textContent=label+'...';
@@ -132,6 +135,7 @@ function tabGeneral(){
     catch(e){m.className='err';m.textContent=e.message}};
   $('#clrdemo').onclick=()=>demoCall('clear-demo','Clearing','Remove the sample packets and demo users?');
   $('#clrall').onclick=()=>demoCall('clear-packets','Deleting','Delete ALL packets, including ones you created? This cannot be undone.');
+  $('#scorch').onclick=()=>scorchFlow();
   $('#seed').onclick=async()=>{const m=$('#seedmsg');m.className='muted';m.textContent='Loading...';try{const r=await api('POST','/api/admin/seed-demo',{});m.textContent='Loaded. PINs: '+r.users;SUsers=await api('GET','/api/admin/users')}catch(e){m.className='err';m.textContent=e.message}};
   [['gn','siteName'],['gb','baseUrl'],['gr','reviewRule']].forEach(([i,k])=>bind(i,g,k));[['gi','idleMinutes'],['gp','pinLength'],['gm','maxFailed'],['gl','lockMinutes']].forEach(([i,k])=>bind(i,g,k,true));
   const here=location.origin,gh=$('#gbh');
@@ -247,4 +251,44 @@ async function tabIntegrations(){
   $('#gdt').onclick=async()=>{const r=$('#gdr');r.className='tres';r.textContent='Saving and testing...';try{await saveAll();const x=await api('POST','/api/admin/drop-test',{});r.className='tres okmsg';r.textContent='Wrote '+x.file}catch(e){r.className='tres err';r.textContent=e.message}};
   $('#pof').onchange=async e=>{const f=e.target.files[0];if(!f)return;const r=$('#por');r.className='tres';r.textContent='Importing...';try{const x=await api('POST','/api/admin/po-import',{csv:await f.text()});toast('Imported '+x.lines+' lines for '+x.pos+' POs');tabIntegrations()}catch(x){r.className='tres err';r.textContent=x.message}};
   $('#pocl').onclick=async()=>{if(!confirm('Clear the PO list?'))return;await api('DELETE','/api/admin/po-list');tabIntegrations()};
+}
+
+
+/* scorched earth: three screens, a typed phrase and a countdown; the server checks all of it again */
+function scorchFlow(){
+  const w=document.createElement('div');w.className='pinwrap';document.body.appendChild(w);
+  const close=()=>w.remove();
+  const box=h=>{w.innerHTML=`<div class="pinbox" style="width:min(560px,96vw);text-align:left;max-height:92vh;overflow:auto">${h}</div>`};
+  const step1=()=>{
+    box(`<h2 style="color:#a32428;margin:0 0 8px">Scorched earth</h2>
+    <p style="margin:0 0 10px"><b>This permanently deletes:</b></p>
+    <ul style="margin:0 0 12px;padding-left:20px;line-height:1.6"><li>every packet, inspection, review and approval</li><li>every PIN user (receivers, coordinators, reviewers)</li><li>all activity history and the sent mail list</li><li>every stored PDF, final packet and photo</li><li>saved layouts and the imported PO list</li></ul>
+    <p style="margin:0 0 12px"><b>Kept:</b> the admin list and the settings (email server, folders, notifications). Files already copied to the DocuWare folder are not touched. One line recording that this happened is kept in the history.</p>
+    <label class="ck" style="display:flex;gap:10px;align-items:center;margin:0 0 10px"><input type="checkbox" id="sc_bk"> Also delete the backup files (zips). This removes your safety net.</label>
+    <label class="ck" style="display:flex;gap:10px;align-items:flex-start;margin:0 0 16px"><input type="checkbox" id="sc_ok" style="margin-top:4px"> <span>I understand that everything listed above will be gone for good and that there is no undo.</span></label>
+    <div class="bar" style="margin:0;justify-content:flex-end"><button class="btn" id="sc_x">Cancel</button><button class="btn danger" id="sc_n" disabled>Continue</button></div>`);
+    $('#sc_x',w).onclick=close;
+    $('#sc_ok',w).onchange=e=>{$('#sc_n',w).disabled=!e.target.checked};
+    $('#sc_n',w).onclick=()=>step2($('#sc_bk',w).checked);
+  };
+  const step2=async bk=>{
+    let tk;
+    try{tk=await api('POST','/api/admin/scorch/token',{})}catch(e){toast(e.message,1);return close()}
+    box(`<h2 style="color:#a32428;margin:0 0 8px">Last check</h2>
+    <p style="margin:0 0 12px">Type <b>${esc(tk.phrase)}</b> exactly, then wait for the countdown. ${bk?'<b>Backups will be deleted too.</b>':'Backups are kept.'}</p>
+    <input id="sc_t" autocomplete="off" spellcheck="false" placeholder="${esc(tk.phrase)}" style="width:100%;min-height:52px;font-size:18px;padding:0 14px;border:2px solid #a32428;border-radius:8px">
+    <p id="sc_m" class="err" style="min-height:22px;margin:10px 0"></p>
+    <div class="bar" style="margin:0;justify-content:flex-end"><button class="btn" id="sc_x">Cancel</button><button class="btn danger" id="sc_go" disabled>Wait ${tk.waitSeconds}...</button></div>`);
+    $('#sc_x',w).onclick=close;
+    let left=tk.waitSeconds;const go=$('#sc_go',w),inp=$('#sc_t',w);
+    const ready=()=>{const ok=left<=0&&inp.value===tk.phrase;go.disabled=!ok;go.textContent=left>0?'Wait '+left+'...':'Delete everything now'};
+    const timer=setInterval(()=>{left--;if(!document.body.contains(w))return clearInterval(timer);if(left<=0)clearInterval(timer);ready()},1000);
+    inp.oninput=ready;inp.focus();
+    go.onclick=async()=>{go.disabled=true;go.textContent='Deleting...';
+      try{const r=await api('POST','/api/admin/scorch',{token:tk.token,phrase:inp.value,backups:bk});
+        box(`<h2 style="margin:0 0 8px">Done</h2><p style="margin:0 0 12px">Deleted ${r.packets} packets, ${r.users} users, ${r.history} history entries, ${r.files} files${r.backups?' and '+r.backups+' backup files':''}.</p><div class="bar" style="margin:0;justify-content:flex-end"><button class="btn pri" id="sc_d">OK</button></div>`);
+        $('#sc_d',w).onclick=()=>{close();location.reload()};
+      }catch(e){$('#sc_m',w).textContent=e.message;go.textContent='Failed'}};
+  };
+  step1();
 }

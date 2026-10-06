@@ -90,6 +90,20 @@ try {
   Check 'reviewer can read the dashboard data' { (Call $rv GET '/api/reports/summary').total -ge 1 }
   Check 'receiver cannot read the dashboard data' { (Status (Call $r1 GET '/api/reports/summary')) -eq 403 }
   Check 'receiver cannot open admin settings' { (Status (Call $r1 GET '/api/admin/settings')) -eq 403 }
+
+  Write-Host "`nScorched earth (last, it wipes the throwaway data)"
+  Check 'scorch refuses a receiver' { (Status (Call $r1 POST '/api/admin/scorch/token' @{})) -eq 403 }
+  Check 'scorch refuses without a token' { (Status (Call $adm POST '/api/admin/scorch' @{ token = 'nope'; phrase = 'DELETE EVERYTHING'; backups = $false })) -eq 400 }
+  $tk = Call $adm POST '/api/admin/scorch/token' @{}
+  Check 'scorch refuses an immediate confirm' { (Status (Call $adm POST '/api/admin/scorch' @{ token = $tk.token; phrase = 'DELETE EVERYTHING'; backups = $false })) -eq 400 }
+  $tk = Call $adm POST '/api/admin/scorch/token' @{}; Start-Sleep 10
+  Check 'scorch refuses a wrong phrase' { (Status (Call $adm POST '/api/admin/scorch' @{ token = $tk.token; phrase = 'delete everything'; backups = $false })) -eq 400 }
+  Check 'packets still there after refusals' { @(Call $adm GET '/api/packets').Count -ge 1 }
+  $tk = Call $adm POST '/api/admin/scorch/token' @{}; Start-Sleep 10
+  $sc = Call $adm POST '/api/admin/scorch' @{ token = $tk.token; phrase = 'DELETE EVERYTHING'; backups = $false }
+  Check 'scorch wipes packets, users and files' { $sc.packets -ge 1 -and @(Call $adm GET '/api/packets' | Where-Object { $_ }).Count -eq 0 -and @(Call $adm GET '/api/admin/users' | Where-Object { $_ }).Count -eq 0 }
+  Check 'token cannot be reused' { (Status (Call $adm POST '/api/admin/scorch' @{ token = $tk.token; phrase = 'DELETE EVERYTHING'; backups = $false })) -eq 400 }
+  Check 'admin still signed in after scorch' { (Call $adm GET '/api/auth/me').kind -eq 'win' }
 }
 finally {
   if ($proc) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; Start-Sleep 1; Write-Host "`n(temporary instance stopped; data in $data)" }

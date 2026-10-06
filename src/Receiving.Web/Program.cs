@@ -647,6 +647,49 @@ ad.MapPost("/clear-packets", (ClaimsPrincipal u) =>
     db.Audit(GetMe(u)!.Name, "clear_all_packets", $"packets={packets}");
     return Results.Ok(new { packets });
 });
+// ---- scorched earth: removes everything except the admin list and the settings. Three server-side gates:
+// a one-time token, the typed phrase, and a minimum wait between asking and confirming.
+var scorchTokens = new Dictionary<string, (string who, DateTime at)>();
+const string ScorchPhrase = "DELETE EVERYTHING";
+ad.MapPost("/scorch/token", (ClaimsPrincipal u) =>
+{
+    var who = GetMe(u)!.Name;
+    var tok = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+    lock (scorchTokens) { foreach (var k in scorchTokens.Where(x => DateTime.UtcNow - x.Value.at > TimeSpan.FromMinutes(5)).Select(x => x.Key).ToList()) scorchTokens.Remove(k); scorchTokens[tok] = (who, DateTime.UtcNow); }
+    db.Audit(who, "scorch_requested");
+    return Results.Ok(new { token = tok, phrase = ScorchPhrase, waitSeconds = 10 });
+});
+ad.MapPost("/scorch", (ScorchReq req, ClaimsPrincipal u) =>
+{
+    var who = GetMe(u)!.Name;
+    (string who, DateTime at) t;
+    lock (scorchTokens) { if (req.Token == null || !scorchTokens.Remove(req.Token, out t)) return Results.BadRequest(new { error = "Start again: the confirmation expired or was already used." }); }
+    if (t.who != who) return Results.BadRequest(new { error = "That confirmation belongs to another admin." });
+    var age = DateTime.UtcNow - t.at;
+    if (age > TimeSpan.FromMinutes(5)) return Results.BadRequest(new { error = "Start again: the confirmation expired." });
+    if (age < TimeSpan.FromSeconds(9)) return Results.BadRequest(new { error = "Too fast. Wait for the countdown, then confirm." });
+    if (!string.Equals(req.Phrase?.Trim(), ScorchPhrase, StringComparison.Ordinal)) return Results.BadRequest(new { error = "The words did not match. Nothing was deleted." });
+    var packets = DeletePackets("1=1");
+    var users = db.Exec("DELETE FROM users");
+    db.Exec("DELETE FROM outbox"); db.Exec("DELETE FROM locks"); db.Exec("DELETE FROM layouts"); db.Exec("DELETE FROM po_lines");
+    db.Exec("DELETE FROM settings WHERE key IN ('po_imported','backup_last')");
+    var history = db.Exec("DELETE FROM audit");
+    int files = 0;
+    foreach (var sub in new[] { "pdfs", "final", "photos" })
+    {
+        var dir = Path.Combine(dataDir, sub); if (!Directory.Exists(dir)) continue;
+        foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories)) { try { File.Delete(f); files++; } catch { } }
+        foreach (var d in Directory.GetDirectories(dir)) { try { Directory.Delete(d, true); } catch { } }
+    }
+    int backups = 0;
+    if (req.Backups)
+    {
+        try { var bdir = backup.Folder(); if (Directory.Exists(bdir)) foreach (var f in Directory.GetFiles(bdir, "*.zip")) { try { File.Delete(f); backups++; } catch { } } } catch { }
+    }
+    try { db.Exec("VACUUM"); } catch { }
+    db.Audit(who, "scorched_earth", $"packets={packets} users={users} history={history} files={files} backups={backups}");
+    return Results.Ok(new { packets, users, history, files, backups });
+});
 ad.MapPost("/seed-demo", (ClaimsPrincipal u) =>
 {
     if (db.Query("SELECT 1 FROM packets", r => 1).Count > 0) return Results.BadRequest(new { error = "Packets already exist. Demo data only loads into an empty system." });
@@ -850,6 +893,7 @@ record Me(string Kind, string Id, string Name, string Initials, string[] Roles, 
 record PinReq(long UserId, string? Pin);
 record UserReq(string? Name, string? Initials, string? Email, string[]? Roles, string? Pin, bool? Active, bool? Unlock, bool? MustChange);
 record ChangePinReq(string? Current, string? New);
+record ScorchReq(string? Token, string? Phrase, bool Backups);
 record AdminReq(string? Account, string? Name, string? Email);
 record SmtpReq(string? Host, int Port, string? Security, string? User, string? FromAddr, string? FromName, string? Password);
 record SettingsReq(GeneralCfg General, SmtpReq Smtp, List<NotifCfg> Notifs);
