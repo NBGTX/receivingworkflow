@@ -1,3 +1,4 @@
+// HTML and plain-text bodies for notification emails, styled per event.
 using System.Net;
 using System.Text;
 
@@ -13,6 +14,7 @@ public static class MailHtml
     const string Dark = "#213B34", Med = "#006325", Light = "#A1CEAD", Pale = "#D9E8E2", Gray = "#F5F4F0", Line = "#DCDAD2", Ink = "#1B2A26", Mute = "#5D6B66";
     const string Font = "Arial,Helvetica,sans-serif";
 
+    /// <summary>Picks the headline, status chip and button label for a notification event.</summary>
     public static Style StyleFor(string evt) => evt switch
     {
         "packet_created" => new("New packet ready for inspection", "Awaiting inspection", "#BFE2F6", "#0B4A6E", "Open packet"),
@@ -34,6 +36,7 @@ public static class MailHtml
         return sb.ToString();
     }
 
+    /// <summary>The HTML body. logoSrc is a cid: reference for real mail, or a data URI for the admin preview.</summary>
     public static string Html(string siteName, Style st, string intro, IList<(string k, string v)> facts, IList<Item>? items, string? link, string buttonLabel, string preheader, string logoSrc)
     {
         var sb = new StringBuilder();
@@ -94,6 +97,7 @@ public static class MailHtml
         return sb.ToString();
     }
 
+    /// <summary>The plain-text alternative to Html.</summary>
     public static string Text(string siteName, Style st, string intro, IList<(string k, string v)> facts, IList<Item>? items, string? link)
     {
         var sb = new StringBuilder();

@@ -31,10 +31,12 @@ const TYPES=[
 const FL={coil:'Coil #',heat:'Heat #',desc:'Description',cc:'NBS # (CC #)',po:'PO #',wt:'Weight'};
 const ago=ts=>{const m=(Date.now()-ts)/6e4;return m<1?'now':m<60?Math.round(m)+' min':m<1440?Math.round(m/60)+' h':Math.round(m/1440)+' d'};
 const fdate=ts=>new Date(ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+// short message at the bottom of the screen
 function toast(t,bad){const e=$('#toast');e.textContent=t;e.style.background=bad?'var(--red)':'';e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('show'),2600)}
 
 /* ---- api ---- */
 const S={me:null,cfg:{siteName:'Steel Receiving',idleMinutes:15,pinLength:4},packets:[]};
+// fetch wrapper: JSON in and out; 440 means the session ended, so go back to the sign-in screen
 async function api(method,url,body,ctype){
   const h={'X-Requested-With':'fetch'};let b;
   if(body instanceof ArrayBuffer){b=body;h['Content-Type']=ctype||'application/octet-stream'}
@@ -51,18 +53,22 @@ const pos=p=>[...new Set(p.rows.map(r=>r.po))];
 const subForms=(p,po)=>TYPES.filter(t=>p.forms[po+'|'+t.k]?.submitted);
 const covered=p=>pos(p).filter(po=>subForms(p,po).length).length;
 const lastT=p=>(p.log[p.log.length-1]||{}).t||p.created;
+// reload the packet list into the cache (S.packets)
 async function loadPackets(){S.packets=await api('GET','/api/packets')}
+// replace one packet in the cache after the server returns it
 function upsert(p){const i=S.packets.findIndex(x=>x.id===p.id);if(i>=0)S.packets[i]=p;else S.packets.unshift(p)}
 
 /* ---- login ---- */
 let idleT=null;
+// sign out after the idle time set in Settings
 function resetIdle(){clearTimeout(idleT);if(!S.me)return;idleT=setTimeout(()=>logout('Signed out after inactivity'),(S.me.idleMinutes||15)*60000)}
 ['pointerdown','keydown','touchstart'].forEach(e=>addEventListener(e,resetIdle,{passive:true}));
 async function logout(msg){try{await api('POST','/api/auth/logout')}catch(e){}S.me=null;S.packets=[];clearTimeout(idleT);showLogin(msg)}
+// card picker plus the Windows admin link
 async function showLogin(msg){
   $('#tabs').innerHTML='';$('#tabs2').innerHTML='';$('#who').innerHTML='';closeDrawer&&closeDrawer();
   $('#app').innerHTML=`<div class="login"><h1>Who is working?</h1><p>${esc(msg||'Tap your card, then enter your PIN.')}</p><div class="ucards" id="ucards"></div>
-   <div class="adminlink"><button class="btn" id="winbtn">${ic('stamp')} Admin sign-in (Windows)</button><p class="hint" id="winerr" style="margin-top:10px"></p></div></div>`;
+   ${howTo('login')}<div class="adminlink"><button class="btn" id="winbtn">${ic('stamp')} Admin sign-in (Windows)</button><p class="hint" id="winerr" style="margin-top:10px"></p></div></div>`;
   $('#winbtn').onclick=winLogin;
   try{
     const cards=await api('GET','/api/auth/cards');
@@ -70,12 +76,14 @@ async function showLogin(msg){
     $$('.ucard').forEach(c=>c.onclick=()=>pinPad(+c.dataset.id,c.dataset.n,c.dataset.i));
   }catch(e){$('#ucards').innerHTML='<div class="card empty err" style="grid-column:1/-1">'+esc(e.message)+'</div>'}
 }
+// top-level navigation, because the browser only does the Windows handshake that way
 function winLogin(){
   // Full page navigation: the browser can run the Windows handshake (or ask for a password) properly here,
   // then the server signs the admin in and sends them back to the app.
   const e=$('#winerr');e.textContent='Opening Windows sign-in...';e.className='hint';
   location.href='/api/auth/windows?next=1';
 }
+// PIN entry dialog
 function pinPad(id,name,ini){
   let v='';const L=S.cfg.pinLength;
   const w=document.createElement('div');w.className='pinwrap';
@@ -112,6 +120,7 @@ function renderShell(){
   const cp=$('#chpin');if(cp)cp.onclick=()=>changePin(false);
   $('.brand b').textContent=S.cfg.siteName||'Steel Receiving';
 }
+// which tabs each role sees, in order
 function tabsFor(){
   const t=[];
   // intake first (overview, list, create), then the people who act on a packet, settings last
@@ -124,6 +133,7 @@ function tabsFor(){
 }
 /* ---- tabs: main ones on the left, My inbox on the right as a highlighted pill with a count ---- */
 let curTab='';
+// number shown on a tab, for example packets waiting in My inbox
 function badgeCount(k){
   if(k==='inbox')return S.packets.filter(p=>p.stage==='new'||p.stage==='inspecting').length;
   if(k==='reviews')return S.packets.filter(p=>p.stage==='review'&&(p.requiredReviewers||[]).some(r=>r.id===S.me.id)&&!(p.approvals||[]).some(a=>a.id===S.me.id)).length;
@@ -139,6 +149,7 @@ function renderTabs(){
 function nav(h){location.hash=h}
 addEventListener('hashchange',()=>{if(S.me)route()});
 let routeSeq=0;
+// hash router: picks the view for the current address
 async function route(){
   if(!S.me)return;
   const seq=++routeSeq;
@@ -189,6 +200,7 @@ function askPin(title,sub,cancelable){
       if(v.length===L){w.remove();resolve(v)}});
   });
 }
+// forced or voluntary PIN change dialog
 async function changePin(force){
   for(;;){
     const cur=await askPin('Enter your current PIN',force?'An admin set this PIN for you. Choose your own now.':'',!force);if(cur===null)return;

@@ -1,7 +1,7 @@
 /* Service worker: lets the app install and open fast. It never caches /api, so data is always live. */
 const VERSION = 'v1';
 const CACHE = 'nbs-receiving-' + VERSION;
-const SHELL = ['/', '/index.html', '/app.css', '/core.js', '/views.js', '/intake.js', '/settings.js', '/manifest.webmanifest',
+const SHELL = ['/', '/index.html', '/app.css', '/core.js', '/help.js', '/views.js', '/intake.js', '/settings.js', '/manifest.webmanifest',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/favicon.svg', '/offline.html'];
 
 self.addEventListener('install', e => {

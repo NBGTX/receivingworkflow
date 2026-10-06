@@ -1,7 +1,10 @@
+// SQLite access: schema creation, small in-place migrations, and thin Exec/Query/Insert helpers.
+// Every call opens its own short-lived connection (WAL mode), so Db is safe to share as a singleton.
 using Microsoft.Data.Sqlite;
 
 namespace Receiving.Web;
 
+/// <summary>Thin SQLite wrapper. Parameters are positional: $0, $1, ... in the SQL map to the params array.</summary>
 public sealed class Db
 {
     readonly string _cs;
@@ -25,6 +28,7 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGE
 ");
     }
 
+    /// <summary>Adds columns and tables introduced after the first release. Safe to run on every start.</summary>
     public void Migrate()
     {
         try { Exec("ALTER TABLE users ADD COLUMN must_change INTEGER NOT NULL DEFAULT 0"); } catch { /* already there */ }

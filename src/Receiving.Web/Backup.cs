@@ -1,3 +1,5 @@
+// Backups: BackupService builds the nightly zip (DB snapshot + files), prunes old ones,
+// and serves the list/download used by the admin Backups tab.
 using System.IO.Compression;
 
 namespace Receiving.Web;
@@ -13,6 +15,7 @@ public sealed class BackupService : BackgroundService
 
     public string Folder() { var g = _s.General(); return string.IsNullOrWhiteSpace(g.BackupFolder) ? Path.Combine(_p.DataDir, "backups") : g.BackupFolder.Trim(); }
 
+    /// <summary>Takes a backup now and returns the zip path. Locked so a manual run cannot overlap the nightly one.</summary>
     public string Run()
     {
         lock (Gate)
@@ -53,6 +56,7 @@ public sealed class BackupService : BackgroundService
         var path = Path.Combine(Folder(), name); return File.Exists(path) ? new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read) : null;
     }
 
+    // Checks once a minute; runs at most once per day after the configured time. A failure also marks today done, so it is not retried every minute (AlertService emails the admins).
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)

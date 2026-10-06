@@ -1,3 +1,4 @@
+// Settings (SMTP, general options, notification templates) stored in the DB, PIN hashing, and the Mailer outbox sender.
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -8,6 +9,7 @@ using MimeKit;
 
 namespace Receiving.Web;
 
+/// <summary>Outgoing mail server settings. The password is stored encrypted (see SettingsStore).</summary>
 public class SmtpCfg
 {
     public string Host { get; set; } = "";
@@ -19,6 +21,7 @@ public class SmtpCfg
     public string FromName { get; set; } = "Steel Receiving";
 }
 
+/// <summary>Site-wide options edited in Settings: sign-in rules, review rule, backups, DocuWare folder drop.</summary>
 public class GeneralCfg
 {
     public string SiteName { get; set; } = "Steel Receiving";
@@ -39,6 +42,7 @@ public class GeneralCfg
     public bool DropCsv { get; set; } = true;
 }
 
+/// <summary>One email notification: the event it fires on, who receives it, and the subject/body template.</summary>
 public class NotifCfg
 {
     public string Event { get; set; } = "";
@@ -51,6 +55,7 @@ public class NotifCfg
     public string Body { get; set; } = "";
 }
 
+/// <summary>Reads and writes settings as JSON rows in the settings table. The SMTP password is protected with DataProtection.</summary>
 public sealed class SettingsStore
 {
     static readonly JsonSerializerOptions J = new(JsonSerializerDefaults.Web);
@@ -125,6 +130,7 @@ public sealed class SettingsStore
     ];
 }
 
+/// <summary>PIN hashing: PBKDF2-SHA256 with a random per-user salt, compared in fixed time.</summary>
 public static class Pin
 {
     public static (string hash, string salt) Make(string pin)
@@ -140,6 +146,7 @@ public static class Pin
     }
 }
 
+/// <summary>Email outbox. Enqueue writes a row; the background loop sends pending rows and retries failures with growing delays, giving up after 5 tries.</summary>
 public sealed class Mailer : BackgroundService
 {
     readonly Db _db; readonly SettingsStore _s; readonly ILogger<Mailer> _log; readonly string _logo;

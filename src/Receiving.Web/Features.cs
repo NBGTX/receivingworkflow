@@ -1,3 +1,5 @@
+// Secondary API endpoints (reports, status, PO list, DocuWare mapping, photos, audit search)
+// plus AlertService, the background check that emails admins when something needs attention.
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -5,9 +7,11 @@ using System.Text.Json.Nodes;
 
 namespace Receiving.Web;
 
+/// <summary>What the feature endpoints need from Program.cs, passed in because the helpers there are local functions.</summary>
 internal sealed record FeatureCtx(WebApplication App, Db Db, SettingsStore Cfg, Mailer Mail, string DataDir,
     Func<ClaimsPrincipal, Me?> GetMe, Func<HttpContext, string> Origin, Func<string, PacketRec?> Load);
 
+/// <summary>One DocuWare index column: its header, where its value comes from, and a constant (when Source is "const").</summary>
 public record DwCol(string Header, string Source, string Const);
 
 /// <summary>Reports, status, PO list, DocuWare index mapping, folder drop, photos, audit search.</summary>
@@ -37,6 +41,7 @@ internal static class Features
         };
     }
 
+    /// <summary>The DocuWare index sheet for a packet: one CSV row per item, columns as mapped in Settings.</summary>
     public static string DocuwareCsv(SettingsStore cfg, string bol, JsonObject d)
     {
         var map = cfg.GetJson("docuware", DefaultMap());
@@ -48,6 +53,7 @@ internal static class Features
         return sb.ToString();
     }
 
+    /// <summary>Copies a final packet (and its CSV, if enabled) to the configured folder. Returns "" when the drop is off, "ERR:..." on failure, else the PDF path.</summary>
     public static string DropFinal(FeatureCtx x, PacketRec p, byte[] pdf)
     {
         var g = x.Cfg.General();
@@ -91,6 +97,7 @@ internal static class Features
     }
 
     // ---------------------------------------------------------------- map everything
+    /// <summary>Registers all the endpoints in this file.</summary>
     public static void Map(FeatureCtx x)
     {
         var app = x.App; var db = x.Db; var cfg = x.Cfg; var dataDir = x.DataDir;

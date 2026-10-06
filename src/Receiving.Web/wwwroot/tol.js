@@ -26,6 +26,7 @@ const ROD={RD0625:[.555,.569],RD0750:[.672,.688],RD0875:[.789,.805],RD1000:[.897
 const ROD_BY_SIZE={'5/8':'RD0625','3/4':'RD0750','7/8':'RD0875','1':'RD1000','1 1/8':'RD1125','1 1/4':'RD1250'};
 
 const fmt=n=>(Math.round(n*10000)/10000).toString().replace(/^0\./,'.');
+// advisory tolerance warnings; never blocks a submit
 function tolCheck(type,it){
   const out=[];const add=(field,msg)=>out.push({field,msg});
   const v=k=>toNum(it[k]);

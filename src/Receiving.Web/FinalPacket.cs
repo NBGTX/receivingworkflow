@@ -1,3 +1,4 @@
+// Final packet PDF builder (PdfSharp): cover sheet, original pages, inspection sheets, photos, activity record.
 using System.Text.Json.Nodes;
 using PdfSharp.Drawing;
 using PdfSharp.Fonts;
@@ -78,6 +79,7 @@ public static class FinalPacket
         public void Close() { G?.Dispose(); }
     }
 
+    /// <summary>Joins several PDFs into one, in the order given.</summary>
     public static byte[] Merge(IEnumerable<Stream> files)
     {
         var doc = new PdfDocument();
@@ -89,6 +91,7 @@ public static class FinalPacket
         using var ms = new MemoryStream(); doc.Save(ms, false); return ms.ToArray();
     }
 
+    /// <summary>Returns the packet PDF for the given packet data. originalPdf and photosDir are optional.</summary>
     public static byte[] Build(string bol, string stage, JsonObject d, string? originalPdf, string siteName, string? photosDir = null)
     {
         var doc = new PdfDocument();

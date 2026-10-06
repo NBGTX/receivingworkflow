@@ -6,7 +6,7 @@ async function viewDashboard(){
   const fmtH=h=>h==null?'-':h<48?h+' h':Math.round(h/24*10)/10+' d';
   const vendors=d.vendors.filter(v=>v.items>0);
   $('#app').innerHTML=`
-  <div class="pagehead"><div class="grow"><h1>Dashboard</h1><p>${d.total} packet${d.total===1?'':'s'} in the system.</p></div></div>
+  <div class="pagehead"><div class="grow"><h1>Dashboard</h1><p>${d.total} packet${d.total===1?'':'s'} in the system.</p></div></div>${howTo('dashboard')}
   <div class="stats">${d.byStage.map(s=>`<a class="stat" href="#/board" style="text-decoration:none"><div class="n">${s.n}</div><div class="l">${SL[s.stage]}</div></a>`).join('')}</div>
   <div class="dgrid">
    <div class="card"><h2>Packets per week</h2><div class="bars">${d.weeks.map(w=>`<div class="bcol"><div class="bval">${w.n||''}</div><div class="bar1" style="height:${Math.max(3,w.n/maxW*110)}px"></div><div class="blab">${esc(w.label)}</div></div>`).join('')}</div></div>

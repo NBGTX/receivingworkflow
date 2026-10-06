@@ -8,11 +8,12 @@ async function fitPage(){
   scale=Math.max(.5,Math.min(4,availW/v.width,(availH-12)/v.height));
 }
 let pdf=null,pageNo=1,scale=1.5,rot={},boxes={},active=null,ocrWorker=null,curBuf=null,picks={};
+// new packet screen: PDF on the left, details and rows on the right
 function viewNew(){
   $('#app').classList.add('wide');
   pdf=null;boxes={};rot={};pageNo=1;active=null;curBuf=null;picks={};
   $('#app').innerHTML=`
-  <div class="pagehead"><div class="grow"><h1>New packet</h1><p>Open the packet PDF, or pick several files at once to join them. Then click a field and drag a box around the text to fill it.</p></div></div>
+  <div class="pagehead"><div class="grow"><h1>New packet</h1><p>Open the packet PDF, or pick several files at once to join them. Then click a field and drag a box around the text to fill it.</p></div></div>${howTo('new')}
   <div class="ix">
    <div class="card"><h2>Packet PDF</h2>
     <div class="vtool"><input type="file" id="file" accept="application/pdf" multiple style="font-size:13px" title="Pick several files to merge them in the order shown"></div>
@@ -94,6 +95,7 @@ function readBox(b,multi){
     return data.text.split('\n').map(s=>s.trim()).filter(Boolean);
   });
 }
+// read the page text in the browser (Tesseract); nothing is sent to a server
 async function ocr(b,multi){
   try{
     ocrs('Reading...',1);
@@ -105,12 +107,14 @@ async function ocr(b,multi){
 }
 function clean(f,t){if(f==='po')return t.replace(/\s+/g,'').replace(/^T[XK]?[-_ ]?/i,'TX-').replace(/[Oo](?=\d)/g,'0');if(['heat','coil','cc','bol'].includes(f))return t.replace(/\s+/g,'').replace(/^[^A-Za-z0-9.]+|[^A-Za-z0-9]+$/g,'');if(f==='wt')return t.replace(/[^\d.,]/g,'');return t}
 function put(el,t){el.value=clean(el.dataset.f,t);if($('#auto').checked){const o=$$('[data-f]'),i=o.indexOf(el);if(i<o.length-1)setActive(o[i+1])}}
+// fill one column of rows from a box dragged on the PDF
 function fillColumn(f,lines){let tr=$('#rows tr');lines.forEach(t=>{if(!tr)tr=addRow();tr.querySelector(`[data-f=${f}]`).value=clean(f,t);tr=tr.nextElementSibling})}
 function fillDown(lines){const f=active.dataset.f;let tr=active.closest('tr');lines.forEach(t=>{if(!tr)tr=addRow();tr.querySelector(`[data-f=${f}]`).value=clean(f,t);tr=tr.nextElementSibling})}
 function ocrs(t,k){const o=$('#ocr');if(!o)return;o.textContent=t;o.className=k===1?'busy':k===2?'err':''}
 function addRow(v={}){const tr=document.createElement('tr');tr.innerHTML=COLS.map(c=>`<td><input data-f="${c[0]}" placeholder="${c[1]}" aria-label="${c[1]}" value="${esc(v[c[0]]||'')}"></td>`).join('')+'<td><button class="btn sm ghost" tabindex="-1" title="Remove row">&times;</button></td>';
   tr.querySelector('button').onclick=()=>tr.remove();tr.querySelectorAll('input').forEach(i=>i.addEventListener('focus',()=>setActive(i)));$('#rows').appendChild(tr);return tr}
 function setActive(el){if(active)active.classList.remove('active');active=el;if(el){el.classList.add('active');el.focus({preventScroll:true})}}
+// create the packet, then upload the PDF so receivers are notified
 async function saveNew(){
   const bol=$('[data-f=bol]').value.trim();
   const rows=$$('#rows tr').map(tr=>{const o={};$$('input',tr).forEach(i=>o[i.dataset.f]=i.value.trim());return o}).filter(r=>r.po);

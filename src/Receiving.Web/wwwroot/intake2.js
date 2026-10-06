@@ -13,6 +13,7 @@ const RX={
 };
 const fixPo=d=>'TX-'+d.replace(/[OoDQ]/g,'0');
 
+// turn the page text into suggested header fields and item rows
 function parseBol(text){
   const lines=text.split('\n').map(s=>s.replace(/\s+/g,' ').trim()).filter(Boolean);
   const full=lines.join('\n'),out={bol:'',vendor:'',ship:'',carrier:'',pos:[],rows:[]};
@@ -76,6 +77,7 @@ viewNew=function(){SUG=null;_viewNew();injectExtras()};
 const _openData=openData;
 openData=async function(buf){await _openData(buf);scanPage()};
 
+// read the current page and refresh the suggestions
 async function scanPage(){
   if(!pdf)return;
   const myPage=pageNo,box=$('#sug');if(!box)return;
@@ -90,6 +92,7 @@ async function scanPage(){
   }catch(e){box.innerHTML='<div class="sug err">Could not read the page: '+esc(e.message)+'</div>'}
 }
 
+// the dotted pills and the helper buttons
 function showSuggestions(){
   const box=$('#sug');if(!box||!SUG)return;
   const chip=(label,val,field)=>val?`<button class="chip sg" data-sgf="${field}" data-sgv="${esc(val)}">${esc(label)} <b>${esc(val)}</b></button>`:'';
@@ -152,6 +155,7 @@ function extraChecks(){
   $('#rows').addEventListener('input',e=>{if(e.target.dataset.f==='po')soon()});
   new MutationObserver(soon).observe($('#rows'),{childList:true});
 }
+// compare typed POs with the imported PO list
 async function checkPos(){
   const box=$('#pow');if(!box)return;
   const pos=[...new Set($$('#rows [data-f=po]').map(i=>i.value.trim()).filter(Boolean))];
@@ -174,6 +178,7 @@ saveNew=async function(){
 
 /* ---------- learn from corrections ---------- */
 function dist(a,b){const m=a.length,n=b.length,d=Array.from({length:m+1},(_,i)=>[i]);for(let j=1;j<=n;j++)d[0][j]=j;for(let i=1;i<=m;i++)for(let j=1;j<=n;j++)d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1));return d[m][n]}
+// remember a correction so the same misreading is fixed next time
 async function learnFixes(vendor,sug,finalRows){
   const fixes={};const note=(f,from,to)=>{if(from&&to&&from!==to&&dist(from,to)<=3)(fixes[f]=fixes[f]||{})[from]=to};
   finalRows.forEach((row,i)=>{const s=sug.rows.find(x=>x.cc&&x.cc===row.cc)||sug.rows.find(x=>x.coil&&x.coil===row.coil)||sug.rows[i];if(!s)return;['heat','cc','coil','po','desc'].forEach(f=>note(f,s[f],row[f]))});
@@ -185,6 +190,7 @@ async function learnFixes(vendor,sug,finalRows){
     await api('PUT','/api/layouts/'+encodeURIComponent(vendor),lay);
   }catch(e){}
 }
+// apply remembered corrections to new suggestions
 async function applyFixes(){
   SUG.fixed=0;
   const hit=layoutList.find(l=>SUG.text.toLowerCase().includes(l.name.toLowerCase())||(SUG.vendor&&SUG.vendor.toLowerCase().includes(l.name.toLowerCase())));
@@ -217,6 +223,7 @@ function findHeat(h,pages){
   for(const p of pages){const T=normH(p.text);for(let i=0;i+H.length<=T.length;i++){let bad=0;for(let j=0;j<H.length&&bad<2;j++)if(T[i+j]!==H[j])bad++;if(bad<=1)return {page:p.n,exact:false}}}
   return null;
 }
+// compare typed heats with the MTR pages
 async function checkHeats(){
   if(!pdf)return;const box=$('#heatres');
   const heats=[...new Set($$('#rows [data-f=heat]').map(i=>i.value.trim()).filter(Boolean))];

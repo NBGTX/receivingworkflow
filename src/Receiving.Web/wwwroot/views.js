@@ -10,6 +10,7 @@ function pkCard(p,note){
 function bindCards(){$$('.pk').forEach(c=>c.onclick=()=>nav('/p/'+c.dataset.id))}
 
 let inboxF='todo';
+// receiver home: packets to inspect, mine, submitted
 function viewInbox(){
   const open=S.packets.filter(p=>p.stage==='new'||p.stage==='inspecting');
   const mine=open.filter(p=>p.claimedBy&&p.claimedBy.id===S.me.id);
@@ -20,15 +21,17 @@ function viewInbox(){
     return inboxF==='mine'?a.created-b.created:b.created-a.created});
   $('#app').innerHTML=`
   <div class="pagehead"><div class="grow"><h1>My inbox</h1><p>Packets waiting for inspection on the dock. Open one to start, or claim it so the others know it is yours.</p></div></div>
+  ${howTo('inbox')}
   <div class="filters"><button class="pill ${inboxF==='todo'?'on':''}" data-f="todo">To inspect <i>${open.length}</i></button><button class="pill ${inboxF==='mine'?'on':''}" data-f="mine">Mine <i>${mine.length}</i></button><button class="pill ${inboxF==='done'?'on':''}" data-f="done">Submitted <i>${done.length}</i></button></div>
   ${list.length?`<div class="cards">${list.map(p=>pkCard(p)).join('')}</div>`:`<div class="card empty">${inboxF==='done'?'No submitted packets.':inboxF==='mine'?'You have not claimed any packets.':'Nothing to inspect right now.'}</div>`}`;
   $$('.pill[data-f]').forEach(b=>b.onclick=()=>{inboxF=b.dataset.f;viewInbox()});bindCards();
 }
 
+// reviewer queue
 function viewReviews(){
   const mine=p=>p.stage==='review'&&(p.requiredReviewers||[]).some(r=>r.id===S.me.id)&&!(p.approvals||[]).some(a=>a.id===S.me.id);
   const wait=S.packets.filter(mine),other=S.packets.filter(p=>p.stage==='review'&&!mine(p));
-  $('#app').innerHTML=`<div class="pagehead"><div class="grow"><h1>Reviews</h1><p>Packets with inspections finished, waiting for approval.</p></div></div>
+  $('#app').innerHTML=`<div class="pagehead"><div class="grow"><h1>Reviews</h1><p>Packets with inspections finished, waiting for approval.</p></div></div>${howTo('reviews')}
   <h2 style="margin:0 0 10px;color:var(--dg)">Waiting for you <span class="num" style="background:var(--pg);padding:3px 10px;border-radius:99px;font-size:13px">${wait.length}</span></h2>
   ${wait.length?`<div class="cards">${wait.map(p=>pkCard(p,'Needs your approval')).join('')}</div>`:'<div class="card empty">Nothing waiting for you.</div>'}
   ${other.length?`<h2 style="margin:26px 0 10px;color:var(--dg)">Other packets in review</h2><div class="cards">${other.map(p=>pkCard(p,(p.approvals||[]).length+' of '+(p.requiredReviewers||[]).length+' approved')).join('')}</div>`:''}`;
@@ -36,11 +39,13 @@ function viewReviews(){
 }
 
 let boardF='all',boardQ='';
+// all packets with search and status filter
 function viewBoard(){
   const cnt=k=>S.packets.filter(p=>p.stage===k).length;
   const rows=S.packets.filter(p=>(boardF==='all'||p.stage===boardF)&&(!boardQ||(p.bol+p.vendor+pos(p).join(' ')+p.rows.map(r=>r.heat+r.cc).join(' ')).toLowerCase().includes(boardQ.toLowerCase())));
   $('#app').innerHTML=`
   <div class="pagehead"><div class="grow"><h1>Packets</h1><p>Every steel packet and where it stands.</p></div>${has('coordinator')?`<a class="btn pri" href="#/new">${ic('plus')} New packet</a>`:''}</div>
+  ${howTo('board')}
   <div class="stats">${STAGES.map(([k,l])=>`<button class="stat ${boardF===k?'on':''}" data-s="${k}"><div class="n">${cnt(k)}</div><div class="l">${l}</div></button>`).join('')}</div>
   <div class="toolbar"><div class="search">${ic('search')}<input id="q" placeholder="Search BOL, PO, vendor, heat, CC #" value="${esc(boardQ)}"></div><button class="pill ${boardF==='all'?'on':''}" data-s="all">All <i>${S.packets.length}</i></button></div>
   <table class="list"><thead><tr><th>BOL #</th><th>Vendor</th><th>POs</th><th>Items</th><th>Inspections</th><th>Status</th><th>In stage</th></tr></thead><tbody>
@@ -67,6 +72,7 @@ function viewPacket(id){
    <span class="chip ${p.stage}" style="font-size:14px;padding:6px 14px">${SL[p.stage]}</span>
    ${has('coordinator')&&p.stage!=='filed'?`<a class="btn" href="/api/packets/${p.id}/final.pdf?inline=1" target="_blank">${ic('file')} Preview final packet</a>`:''}
    ${p.hasPdf?`<button class="btn" id="viewpdf">${ic('file')} View packet PDF</button>`:''}</div>
+  ${howTo('packet:'+p.stage)}
   ${draftBanner(p)}
   <div class="card" style="margin-bottom:18px"><div class="steps">${STAGES.map(([k,l],i)=>`<div class="step ${i<si?'done':i===si?'cur':''}"><i></i>${l}</div>`).join('')}</div></div>
   <div class="grid2"><div>
@@ -100,6 +106,7 @@ function viewPacket(id){
   const dp=$('#delpk');if(dp)dp.onclick=async()=>{if(!confirm('Delete BOL '+p.bol+'? This removes its PDF and cannot be undone.'))return;try{await api('DELETE','/api/packets/'+p.id);S.packets=S.packets.filter(x=>x.id!==p.id);toast('Packet deleted');nav('/board')}catch(e){toast(e.message,1)}};
   const ap2=$('#attachpdf');if(ap2)ap2.onchange=async e=>{const f=e.target.files[0];if(!f)return;try{toast('Uploading...');await api('POST','/api/packets/'+p.id+'/pdf',await f.arrayBuffer(),'application/pdf');upsert(await api('GET','/api/packets/'+p.id));toast('PDF attached, packet sent to receivers');viewPacket(p.id)}catch(x){toast(x.message,1)}};
 }
+// the action box for the packet's current step (receive, authorize, filed downloads)
 function stageAction(p){
   const req=p.requiredReviewers||[],apr=p.approvals||[];
   if(p.stage==='review'){
@@ -138,6 +145,7 @@ async function openTol(T){
     const n=document.createElement('p');n.style.cssText='color:#fff;text-align:center;font-size:12px';n.textContent='From paper sheet '+T.form;body.appendChild(n);
   }catch(e){body.innerHTML='<div class="card empty err">Could not load tolerance tables: '+esc(e.message)+'</div>'}
 }
+// one inspection form: lock, autosave, draft/discard, submit
 async function viewForm(id,po,tk){
   const p=P(id),T=TYPES.find(t=>t.k===tk);if(!p||!T){nav('/inbox');return}
   const key=po+'|'+tk,rs=p.rows.filter(r=>r.po===po);
@@ -154,6 +162,7 @@ async function viewForm(id,po,tk){
   $('#app').innerHTML=`
   <button class="crumb" id="back">${ic('back')} BOL ${esc(p.bol)}</button>
   <div class="pagehead"><div class="grow"><h1>${T.n} inspection</h1><p>${esc(po)} &middot; ${esc(p.vendor)} &middot; sheet ${T.form}</p></div>${f.submitted?'<span class="chip on" style="font-size:14px;padding:6px 14px">Submitted</span>':''}${p.hasPdf?`<button class="btn" id="viewpdf">${ic('file')} View packet PDF</button>`:''}</div>
+  ${howTo('form')}
   ${lockMsg?`<div class="banner"><b>${esc(lockMsg)}</b> You can look, but not change it until they close it.${has('coordinator')?` <button class="btn sm" id="forcelock">Release their lock</button>`:''}</div>`:''}
   <div class="card" style="margin-bottom:14px"><div class="fh">
     <div class="fld"><label>PO #</label><input value="${esc(po)}" readonly></div><div class="fld"><label>BOL #</label><input value="${esc(p.bol)}" readonly></div>
@@ -224,6 +233,7 @@ async function viewForm(id,po,tk){
 function closeDrawer(){$('#drawer').classList.remove('open','wide')}
 $('#dclose').onclick=closeDrawer;
 function openText(title,txt){$('#dtitle').textContent=title;$('#dbody').innerHTML=`<div class="card empty">${esc(txt)}</div>`;$('#drawer').classList.remove('wide');$('#drawer').classList.add('open')}
+// show the packet PDF in the side drawer
 async function openPdf(p){
   $('#dtitle').textContent='BOL '+p.bol+' packet';$('#drawer').classList.remove('wide');$('#drawer').classList.add('open');
   const body=$('#dbody');body.innerHTML='<div class="card empty">Loading...</div>';
@@ -258,6 +268,7 @@ async function reviewerModal(p){
     catch(e){$('#rverr').textContent=e.message}};
 }
 
+// who must approve, with reassign for coordinators
 function reviewersBlock(p){
   const req=p.requiredReviewers||[],apr=p.approvals||[],pick=p.reviewerPick||[];
   const canChange=has('coordinator')&&['new','inspecting','review'].includes(p.stage);
@@ -272,7 +283,9 @@ function reviewersBlock(p){
 /* ---- form locks: opening a form reserves it for you until you close it ---- */
 let LK=null;
 const lockUrl=(id,po,tk)=>`/api/packets/${id}/forms/${encodeURIComponent(po)}/${tk}`;
+// keep the form locked to this receiver while it is open (renewed every minute)
 function startLock(id,po,tk){stopLock();LK={id,po,tk,t:setInterval(()=>api('POST',lockUrl(id,po,tk)+'/lock',{}).catch(e=>toast(e.message,1)),60000)}}
+// release the form lock when leaving the form
 function stopLock(){
   if(!LK)return;clearInterval(LK.t);const u=lockUrl(LK.id,LK.po,LK.tk)+'/unlock';LK=null;
   fetch(u,{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/json'},body:'{}',keepalive:true,credentials:'same-origin'}).catch(()=>{});
@@ -285,6 +298,7 @@ function draftBanner(p){
   return `<div class="banner"><b>Draft: the PDF was never attached.</b> Receivers can't see this packet and no email has gone out. Attach the PDF to send it, or delete the draft and start again.
    <div class="bar" style="margin-top:10px"><label class="btn pri" style="cursor:pointer">${ic('file')} Attach PDF<input type="file" id="attachpdf" accept="application/pdf" hidden></label><button class="btn danger" id="delpk">Delete draft</button></div></div>`;
 }
+// claim or release a packet
 function claimBlock(p){
   const open=p.stage==='new'||p.stage==='inspecting',c=p.claimedBy;
   let h=`<div class="rvbox"><label>Inspector</label>`;
@@ -296,6 +310,7 @@ function claimBlock(p){
   if(has('coordinator')&&p.stage!=='filed'&&p.ready!==false)h+=`<button class="btn sm danger" id="delpk" style="margin-top:10px;margin-left:6px">Delete packet</button>`;
   return h+'</div>';
 }
+// dialog that asks for a reason before a sensitive change
 function reasonModal(title,text,btn,go){
   const w=document.createElement('div');w.className='modal';
   w.innerHTML=`<div class="card"><h2>${esc(title)}</h2><p class="hint" style="margin:0 0 12px">${esc(text)}</p><div class="fld"><label>Reason</label><textarea id="rsn" style="min-height:90px" placeholder="Why?"></textarea></div><p class="err" id="rsnerr"></p><div class="bar"><button class="btn pri" id="rsnok">${esc(btn)}</button><button class="btn" id="rsnx">Cancel</button></div></div>`;

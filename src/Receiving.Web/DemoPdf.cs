@@ -1,3 +1,4 @@
+// Generates sample BOL/MTR/PO PDFs for the built-in demo packets (see /api/admin/seed-demo in Program.cs).
 using System.Text.Json.Nodes;
 using PdfSharp.Drawing;
 using PdfSharp.Fonts;
@@ -25,6 +26,7 @@ internal static class DemoPdf
         return g;
     }
 
+    /// <summary>Builds one PDF with BOL, mill test report and purchase order pages for the given rows.</summary>
     public static byte[] Build(string bol, string vendor, string ship, string carrier, JsonArray rows)
     {
         var d = new PdfDocument();

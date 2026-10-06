@@ -3,6 +3,7 @@ let ST=null,STab='users',SUsers=[];
 const ROLES=[['receiver','Receiver / inspector'],['coordinator','Intake coordinator'],['reviewer','Reviewer']];
 const TOKENS='{{bol}} {{vendor}} {{pos}} {{items}} {{actor}} {{d365}} {{stage}} {{link}}';
 
+// admin settings: tab strip and the active tab
 async function viewSettings(){
   $('#app').innerHTML='<div class="card empty">Loading settings...</div>';
   try{[ST,SUsers]=await Promise.all([api('GET','/api/admin/settings'),api('GET','/api/admin/users')])}catch(e){$('#app').innerHTML='<div class="card empty err">'+esc(e.message)+'</div>';return}
@@ -11,13 +12,14 @@ async function viewSettings(){
 function drawSettings(){
   const tabs=[['status','Status'],['users','Users'],['admins','Admins'],['email','Email server'],['notifs','Notifications'],['general','General & security'],['backups','Backups'],['integrations','Integrations'],['outbox','Sent mail'],['audit','Audit log']];
   $('#app').innerHTML=`<div class="pagehead"><div class="grow"><h1>Settings</h1><p>Admin only. Changes apply right away after you save.</p></div></div>
-  <div class="stabs">${tabs.map(([k,l])=>`<button data-t="${k}" class="${STab===k?'on':''}">${l}</button>`).join('')}</div><div id="sbody"></div>`;
+  <div class="stabs">${tabs.map(([k,l])=>`<button data-t="${k}" class="${STab===k?'on':''}">${l}</button>`).join('')}</div>${howTo('settings:'+STab)}<div id="sbody"></div>`;
   $$('.stabs button').forEach(b=>b.onclick=()=>{STab=b.dataset.t;drawSettings()});
   ({status:tabStatus,integrations:tabIntegrations,users:tabUsers,admins:tabAdmins,email:tabEmail,notifs:tabNotifs,general:tabGeneral,backups:tabBackups,outbox:tabOutbox,audit:tabAudit})[STab]();
 }
 const fld=(label,html,cls='')=>`<div class="fld ${cls}"><label>${label}</label>${html}</div>`;
 const inp=(id,val,extra='')=>`<input id="${id}" value="${esc(val??'')}" ${extra}>`;
 function saveBar(){return `<div class="savebar"><button class="btn pri" id="saveAll">Save settings</button><span id="smsg" class="muted"></span></div>`}
+// save every tab that changed
 async function saveAll(){
   const m=$('#smsg');m.className='muted';m.textContent='Saving...';
   try{await api('PUT','/api/admin/settings',{general:ST.general,smtp:{...ST.smtp,password:ST.smtp.newPassword??null},notifs:ST.notifs});delete ST.smtp.newPassword;m.textContent='Saved';
@@ -34,6 +36,7 @@ function tabUsers(){
   ${SUsers.length?SUsers.map(u=>`<tr class="r" data-id="${u.id}"><td class="b">${esc(u.name)}</td><td>${esc(u.initials)}</td><td>${u.roles.map(r=>`<span class="chip po">${r}</span>`).join(' ')}</td><td>${esc(u.email)||'<span class="muted">none</span>'}</td><td>${u.pinSet?'Set':'<span class="err">Not set</span>'}</td><td>${!u.active?'<span class="chip off">Inactive</span>':u.locked?'<span class="chip bad">Locked</span>':'<span class="chip on">Active</span>'}</td></tr>`).join(''):'<tr><td colspan="6" class="empty">No users yet. Add the first one.</td></tr>'}</tbody></table></div>`;
   $('#addU').onclick=()=>userModal(null);$$('tr.r').forEach(r=>r.onclick=()=>userModal(SUsers.find(u=>u.id==r.dataset.id)));
 }
+// add or edit a PIN user
 function userModal(u){
   const L=S.cfg.pinLength,w=document.createElement('div');w.className='modal';
   w.innerHTML=`<div class="card"><h2>${u?'Edit user':'Add user'}</h2><div class="frm">

@@ -1,3 +1,5 @@
+// Startup and wiring: services, authentication, middleware, and all /api endpoints in one file.
+// Feature endpoints live in Features.cs; background jobs in Services.cs, Backup.cs and Features.cs.
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -68,6 +70,7 @@ app.UseStaticFiles(new StaticFileOptions
         ctx.Context.Response.Headers["Cache-Control"] = p.StartsWith("/vendor/") || p.StartsWith("/icons/") || p.StartsWith("/tolerances/") ? "public, max-age=86400" : "no-cache";
     }
 });
+// CSRF guard: changing calls to /api must carry the X-Requested-With header, which a cross-site form post cannot set.
 app.Use(async (c, next) =>
 {
     if (c.Request.Path.StartsWithSegments("/api") && !HttpMethods.IsGet(c.Request.Method) && !HttpMethods.IsHead(c.Request.Method)
@@ -235,6 +238,7 @@ pk.MapGet("/{id}/pdf", (string id) =>
     return File.Exists(path) ? Results.File(path, "application/pdf") : Results.NotFound();
 });
 
+/* ---------------- final packet ---------------- */
 string FinalPath(string id) => Path.Combine(dataDir, "final", Path.GetFileName(id) + ".pdf");
 byte[] BuildFinal(PacketRec p)
 {
@@ -273,6 +277,7 @@ pk.MapPost("/{id}/drop", (string id, ClaimsPrincipal u) =>
     return r.StartsWith("ERR:") ? Results.BadRequest(new { error = r[4..] }) : Results.Ok(new { file = r });
 });
 
+/* ---------------- inspection forms ---------------- */
 pk.MapPut("/{id}/forms/{po}/{type}", (string id, string po, string type, ClaimsPrincipal u, HttpContext c, JsonObject body) =>
 {
     var me = GetMe(u)!; if (!me.Has("receiver", "coordinator")) return Results.Forbid();
@@ -341,6 +346,7 @@ pk.MapPost("/{id}/complete", (string id, ClaimsPrincipal u, HttpContext c) =>
     return Results.Ok(p.ToJson());
 });
 
+/* ---------------- review + approval ---------------- */
 pk.MapPost("/{id}/approve", (string id, ClaimsPrincipal u, HttpContext c) =>
 {
     var me = GetMe(u)!;
@@ -426,6 +432,8 @@ pk.MapPost("/{id}/reviewers", (string id, ClaimsPrincipal u, HttpContext c, Json
 
 
 /* ---------------- form locks, claims, overrides ---------------- */
+// Locks keep two people from editing one form. TryLock also renews the holder's own lock, so the client's repeated
+// /lock calls act as a heartbeat: a closed tab or dead connection frees the form once the lock expires.
 const long LockMs = 3 * 60 * 1000;   // a form stays reserved for 3 minutes after its last heartbeat
 (bool ok, string? holder) TryLock(string k, Me me)
 {
@@ -535,7 +543,7 @@ lay.MapPut("/{name}", (string name, ClaimsPrincipal u, JsonObject body) =>
 });
 lay.MapDelete("/{name}", (string name, ClaimsPrincipal u) => { if (!GetMe(u)!.Has("coordinator")) return Results.Forbid(); db.Exec("DELETE FROM layouts WHERE name=$0", name); return Results.Ok(); });
 
-/* ---------------- admin ---------------- */
+/* ---------------- admin: users and admin list ---------------- */
 var ad = api.MapGroup("/admin").RequireAuthorization("Admin");
 
 ad.MapGet("/users", () => db.Query("SELECT id,name,initials,email,roles,active,pin_hash IS NOT NULL,locked_until FROM users ORDER BY name",
@@ -578,6 +586,7 @@ ad.MapDelete("/admins", (string account, ClaimsPrincipal u) =>
     return Results.Ok();
 });
 
+/* ---------------- admin: settings ---------------- */
 ad.MapGet("/settings", () =>
 {
     var s = cfg.Smtp();
@@ -593,6 +602,7 @@ ad.MapPut("/settings", (ClaimsPrincipal u, SettingsReq q) =>
     db.Audit(GetMe(u)!.Name, "settings_update");
     return Results.Ok();
 });
+/* ---------------- admin: mail, backups ---------------- */
 JsonObject SamplePacket() => JsonNode.Parse("""{"vendor":"Nucor Berkeley","ship":"08/22/26","carrier":"FTMG","d365":"PR-100482","rows":[{"po":"TX-0015373","heat":"1612252","cc":"161886","desc":"W12x30","len":"43' 0\"","wt":"7,740"},{"po":"TX-0015373","heat":"2612251","cc":"161887","desc":"W12x30","len":"43' 0\"","wt":"7,740"},{"po":"TX-0015478","heat":"1612390","cc":"161891","desc":"W12x26","len":"50' 0\"","wt":"7,800"}]}""")!.AsObject();
 
 ad.MapPost("/test-email", async (ClaimsPrincipal u, HttpContext c, JsonObject body) =>
@@ -628,6 +638,8 @@ ad.MapPost("/preview-email", (HttpContext c, JsonObject body) =>
     var (subject, _, html) = Compose(evt, n, d, "1929915", "review", "sample", GetMe(c.User)!.Name, Origin(c), true);
     return Results.Ok(new { subject, html });
 });
+/* ---------------- admin: demo data + scorched earth ---------------- */
+// removes one packet and everything tied to it (files, queued mail, locks)
 void DeleteOne(string id)
 {
     var f = Path.Combine(dataDir, "pdfs", Path.GetFileName(id) + ".pdf"); if (File.Exists(f)) File.Delete(f);
@@ -799,6 +811,7 @@ ad.MapPost("/seed-demo", (ClaimsPrincipal u) =>
     db.Audit(GetMe(u)!.Name, "seed_demo");
     return Results.Ok(new { users = "Receiver One 1111, Receiver Two 2222, Demo Coordinator 3333, Demo Reviewer 4444", packets = 5 });
 });
+/* ---- sent mail queue ---- */
 ad.MapGet("/outbox", () => db.Query("SELECT id,to_addr,subject,event,status,attempts,error,created,sent_at FROM outbox ORDER BY id DESC LIMIT 100",
     r => new { id = r.GetInt64(0), to = r.GetString(1), subject = r.GetString(2), evt = r.IsDBNull(3) ? "" : r.GetString(3), status = r.GetString(4), attempts = r.GetInt32(5), error = r.IsDBNull(6) ? "" : r.GetString(6), created = r.GetInt64(7), sentAt = r.IsDBNull(8) ? 0 : r.GetInt64(8) }));
 ad.MapPost("/outbox/{id:long}/retry", (long id) => { db.Exec("UPDATE outbox SET status='pending',attempts=0,next_try=0 WHERE id=$0", id); return Results.Ok(); });
@@ -808,6 +821,7 @@ app.MapFallbackToFile("index.html");
 app.Run();
 
 /* ---------------- helpers ---------------- */
+// The signed-in user from our cookie, or null (PIN and Windows sign-ins both end up as the cookie).
 Me? GetMe(ClaimsPrincipal u)
 {
     if (u.Identity?.IsAuthenticated != true || u.Identity.AuthenticationType != CookieAuthenticationDefaults.AuthenticationScheme) return null;   // ignore a raw Windows identity from IIS
@@ -853,6 +867,7 @@ JsonObject PacketJson(string id, string bol, string stage, long created, long up
 PacketRec? LoadPacket(string id) =>
     db.One("SELECT id,bol,stage,created,data FROM packets WHERE id=$0", r => new PacketRec(db, r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt64(3), JsonNode.Parse(r.GetString(4))!.AsObject()), id);
 
+// Builds one notification (subject, plain text, HTML) from the event's template. preview=true embeds the logo for the admin preview.
 (string subject, string text, string html) Compose(string evt, NotifCfg n, JsonObject d, string bol, string stage, string id, string actor, string origin, bool preview, Dictionary<string, string>? extra = null)
 {
     var vars = new Dictionary<string, string>
@@ -873,6 +888,7 @@ PacketRec? LoadPacket(string id) =>
     return (subject, MailHtml.Text(site, st, intro, facts, items, link), html);
 }
 
+// Queues the event's email for everyone it is set up for (roles, named users, extra addresses).
 void Notify(string evt, PacketRec p, string actor, string origin, Dictionary<string, string>? extra = null)
 {
     var n = cfg.Notifs().FirstOrDefault(x => x.Event == evt); if (n == null || !n.Enabled) return;
@@ -894,6 +910,7 @@ void NotifyUsers(string evt, PacketRec p, string actor, string origin, IEnumerab
     mail.Enqueue(evt, p.Id, to, subject, text, html);
 }
 
+/// <summary>The signed-in person. Kind is "pin" or "win"; admins pass every role check.</summary>
 record Me(string Kind, string Id, string Name, string Initials, string[] Roles, bool MustChange = false)
 {
     public bool Admin => Roles.Contains("admin");
@@ -907,6 +924,7 @@ record AdminReq(string? Account, string? Name, string? Email);
 record SmtpReq(string? Host, int Port, string? Security, string? User, string? FromAddr, string? FromName, string? Password);
 record SettingsReq(GeneralCfg General, SmtpReq Smtp, List<NotifCfg> Notifs);
 
+/// <summary>A packet row: Data is the JSON document (rows, forms, approvals, log); Save writes stage and Data back.</summary>
 class PacketRec(Db db, string id, string bol, string stage, long created, JsonObject data)
 {
     public string Id = id, Bol = bol; public string Stage = stage; public long Created = created; public JsonObject Data = data;
