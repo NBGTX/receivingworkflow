@@ -457,15 +457,15 @@ input.warnfld{border-color:#e3b25a !important;background:var(--amberbg) !importa
 .top .tabs::-webkit-scrollbar{display:none}
 .top .who,.top .brand{flex:0 0 auto}
 .top .tabs2{flex:0 0 auto}
-@media(max-width:1100px){.userchip>div:not(.avatar){display:none}}
-@media(max-width:1000px){.tabs a{padding:0 9px !important;font-size:14px}}
+@media(max-width:1300px){.userchip>div:not(.avatar){display:none}}
+@media(max-width:1300px){.tabs a{padding:0 9px !important;font-size:14px}}
 #addRow,#save{min-height:48px}
 
 a.btn,a.btn:hover{text-decoration:none}
 th{white-space:nowrap}
 .top .tabs{overflow:visible}
-@media(max-width:1000px){.tabs a:not(.on) .tl{display:none}.tabs a{gap:6px}.tabs a:not(.on){padding:0 12px !important}}
-@media(max-width:1000px){.tabs2 a .tl{display:inline !important}}
+@media(max-width:1300px){.tabs a:not(.on) .tl{display:none}.tabs a{gap:6px}.tabs a:not(.on){padding:0 12px !important}}
+@media(max-width:1300px){.tabs2 a .tl{display:inline !important}}
 .pagehead{align-items:center}
 .types{grid-template-columns:repeat(auto-fit,minmax(150px,1fr)) !important}
 .types .type{min-height:76px}
