@@ -32,7 +32,13 @@ const FL={coil:'Coil #',heat:'Heat #',desc:'Description',cc:'NBS # (CC #)',po:'P
 const ago=ts=>{const m=(Date.now()-ts)/6e4;return m<1?'now':m<60?Math.round(m)+' min':m<1440?Math.round(m/60)+' h':Math.round(m/1440)+' d'};
 const fdate=ts=>new Date(ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
 // short message at the bottom of the screen
-function toast(t,bad){const e=$('#toast');e.textContent=t;e.style.background=bad?'var(--red)':'';e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('show'),2600)}
+// short message at the bottom; act = {label, fn, ms} adds a button such as Undo
+function toast(t,bad,act){
+  const e=$('#toast');e.textContent=t;e.style.background=bad?'var(--red)':'';
+  if(act){const b=document.createElement('button');b.type='button';b.className='toast-act';b.textContent=act.label;b.onclick=()=>{e.classList.remove('show');clearTimeout(toast.t);act.fn()};e.appendChild(b)}
+  e.style.pointerEvents=act?'auto':'';
+  e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('show'),act?(act.ms||10000):2600);
+}
 
 /* ---- api ---- */
 const S={me:null,cfg:{siteName:'Steel Receiving',idleMinutes:15,pinLength:4},packets:[]};
@@ -59,9 +65,24 @@ async function loadPackets(){S.packets=await api('GET','/api/packets')}
 function upsert(p){const i=S.packets.findIndex(x=>x.id===p.id);if(i>=0)S.packets[i]=p;else S.packets.unshift(p)}
 
 /* ---- login ---- */
-let idleT=null;
+let idleT=null,warnT=null,warnEl=null,warnI=null;
 // sign out after the idle time set in Settings
-function resetIdle(){clearTimeout(idleT);if(!S.me)return;idleT=setTimeout(()=>logout('Signed out after inactivity'),(S.me.idleMinutes||15)*60000)}
+function closeIdleWarn(){clearInterval(warnI);if(warnEl){warnEl.remove();warnEl=null}}
+function resetIdle(){
+  clearTimeout(idleT);clearTimeout(warnT);closeIdleWarn();if(!S.me)return;
+  const ms=(S.me.idleMinutes||15)*60000;
+  idleT=setTimeout(()=>logout('Signed out after inactivity'),ms);
+  if(ms>90000)warnT=setTimeout(idleWarn,ms-60000);   // one minute of notice
+}
+// "Still there?" dialog before the automatic sign-out; any tap keeps the session
+function idleWarn(){
+  if(!S.me)return;
+  warnEl=document.createElement('div');warnEl.className='pinwrap';let left=60;
+  warnEl.innerHTML=`<div class="pinbox" style="width:min(420px,94vw)"><b style="font-size:20px;color:var(--dg)">Still there?</b><p id="iw_t" style="margin:12px 0 18px">You will be signed out in 60 seconds. Inspection entries are saved as drafts.</p><button class="btn pri big" id="iw_b">Stay signed in</button></div>`;
+  document.body.appendChild(warnEl);
+  warnEl.querySelector('#iw_b').onclick=()=>{api('GET','/api/auth/me').catch(()=>{});resetIdle()};
+  warnI=setInterval(()=>{left--;const t=warnEl&&warnEl.querySelector('#iw_t');if(t)t.textContent='You will be signed out in '+left+' seconds. Inspection entries are saved as drafts.'},1000);
+}
 ['pointerdown','keydown','touchstart'].forEach(e=>addEventListener(e,resetIdle,{passive:true}));
 async function logout(msg){try{await api('POST','/api/auth/logout')}catch(e){}S.me=null;S.packets=[];clearTimeout(idleT);showLogin(msg)}
 // card picker plus the Windows admin link
@@ -152,6 +173,7 @@ let routeSeq=0;
 // hash router: picks the view for the current address
 async function route(){
   if(!S.me)return;
+  if(typeof syncAll==='function')syncAll();
   const seq=++routeSeq;
   if(typeof stopLock==='function')stopLock();
   const parts=(location.hash||'').replace(/^#\/?/,'').split('/').map(decodeURIComponent);

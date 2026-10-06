@@ -203,7 +203,7 @@ async function tabStatus(){
   const tile=(label,val,sub,state)=>`<div class="stat" style="cursor:default;${state==='bad'?'outline:3px solid var(--red);outline-offset:-1px':state==='warn'?'outline:3px solid #e3b25a;outline-offset:-1px':''}"><div class="n" style="font-size:24px">${val}</div><div class="l">${label}${sub?'<br><span class="muted">'+sub+'</span>':''}</div></div>`;
   const total=d.packets.reduce((a,b)=>a+b.n,0),diskLow=d.diskFreeGB!=null&&d.diskFreeGB<5;
   const lastB=d.backup.last||'never',stale=d.backup.enabled&&d.backup.last&&(Date.now()-new Date(d.backup.last+'T00:00:00').getTime())>2*864e5;
-  $('#sbody').innerHTML=`<div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
+  $('#sbody').innerHTML=(await setupChecklist(d))+`<div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
    ${tile('Packets',total,d.users+' active users')}
    ${tile('Disk free',d.diskFreeGB==null?'?':d.diskFreeGB+' GB',d.diskTotalGB?'of '+d.diskTotalGB+' GB':'',diskLow?'bad':'')}
    ${tile('Database',d.dbMB+' MB','up '+d.uptimeHours+' h')}
@@ -214,6 +214,7 @@ async function tabStatus(){
   <div class="card" style="margin-top:16px"><h2>About this server</h2>
    <div class="kv"><div><label>Version</label><div>${esc(d.version)}</div></div><div><label>Data folder</label><div style="font-size:13px;word-break:break-all">${esc(d.dataDir)}</div></div></div>
    <p class="hint" style="margin-top:10px">Alerts go to every admin with an email and to the addresses in Settings > Integrations, once a day per problem: failed mail, no backup for 2 days, failed backup, failed folder copy, and under 5 GB of disk.</p></div>`;
+  bindChecklist();
 }
 
 /* integrations: alerts, DocuWare folder drop, DocuWare columns, PO list */

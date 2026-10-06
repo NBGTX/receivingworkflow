@@ -72,17 +72,20 @@ function viewPacket(id){
    <span class="chip ${p.stage}" style="font-size:14px;padding:6px 14px">${SL[p.stage]}</span>
    ${has('coordinator')&&p.stage!=='filed'?`<a class="btn" href="/api/packets/${p.id}/final.pdf?inline=1" target="_blank">${ic('file')} Preview final packet</a>`:''}
    ${p.hasPdf?`<button class="btn" id="viewpdf">${ic('file')} View packet PDF</button>`:''}</div>
+  ${nextStepHtml(p)}
   ${howTo('packet:'+p.stage)}
   ${draftBanner(p)}
   <div class="card" style="margin-bottom:18px"><div class="steps">${STAGES.map(([k,l],i)=>`<div class="step ${i<si?'done':i===si?'cur':''}"><i></i>${l}</div>`).join('')}</div></div>
   <div class="grid2"><div>
+    ${reviewSummaryHtml(p)}
     <div class="card"><h2>Inspections by PO</h2>
     <p class="muted" style="margin:-4px 0 4px">One inspection per PO and material type. Items of the same type go in the same form.</p>
-    ${pos(p).map(po=>{const rs=p.rows.filter(r=>r.po===po);
-     return `<div class="pobox"><div class="ph"><h3>${esc(po)}</h3><span class="muted">${rs.length} item${rs.length===1?'':'s'}</span>${subForms(p,po).length?`<span class="chip on">${ic('check')} Inspected</span>`:`<span class="chip new">Needs inspection</span>`}</div>
+    ${pos(p).map(po=>{const rs=p.rows.filter(r=>r.po===po),sg=suggestTypes(rs),cov=rs.map((r,j)=>covStatus(p,po,rs,j)),nDone=cov.filter(x=>x==='done').length;
+     return `<div class="pobox" data-po="${esc(po)}"><div class="ph"><h3>${esc(po)}</h3><span class="muted">${rs.length} item${rs.length===1?'':'s'}${nDone?' &middot; '+nDone+' inspected':''}</span>${subForms(p,po).length?`<span class="chip on">${ic('check')} Inspected</span>`:`<span class="chip new">Needs inspection</span>`}</div>
       <div class="types">${TYPES.map(t=>{const f=p.forms[po+'|'+t.k];const lk=(p.locks||[]).find(l=>l.k===p.id+'|'+po+'|'+t.k);const cls=f&&f.submitted?'done':(f||lk)?'draft':'';
-       return `<button class="type ${cls}" data-po="${esc(po)}" data-t="${t.k}">${t.n}<small>${f&&f.submitted?'Submitted by '+esc(f.inspector||''):lk?esc(lk.name)+' is working on it':f?'Draft saved':(editable&&canInspect?'Start inspection':'Not used')}</small></button>`}).join('')}</div>
-      <table class="lines"><thead><tr><th>Heat #</th><th>Coil / bundle #</th><th>CC #</th><th>Description</th><th>Length</th><th>Weight</th></tr></thead><tbody>${rs.map(r=>`<tr><td>${esc(r.heat)}</td><td>${esc(r.coil)}</td><td><b>${esc(r.cc)}</b></td><td>${esc(r.desc)}</td><td>${esc(r.len)}</td><td>${esc(r.wt)}</td></tr>`).join('')}</tbody></table></div>`}).join('')}
+       const hint=sg[t.k]&&editable&&canInspect&&!(f&&f.submitted);
+       return `<button class="type ${cls}${hint?' sugg':''}" data-po="${esc(po)}" data-t="${t.k}">${t.n}${hint?'<em class="sg">Suggested</em>':''}<small>${f&&f.submitted?'Submitted by '+esc(f.inspector||''):lk?esc(lk.name)+' is working on it':f?'Draft saved':(editable&&canInspect?'Start inspection':'Not used')}</small></button>`}).join('')}</div>
+      <table class="lines"><thead><tr><th>Heat #</th><th>Coil / bundle #</th><th>CC #</th><th>Description</th><th>Length</th><th>Weight</th><th>Inspected</th></tr></thead><tbody>${rs.map((r,j)=>`<tr><td>${esc(r.heat)}</td><td>${esc(r.coil)}</td><td><b>${esc(r.cc)}</b></td><td>${esc(r.desc)}</td><td>${esc(r.len)}</td><td>${esc(r.wt)}</td><td>${cov[j]==='done'?'<span class="cv ok">\u2713</span>':cov[j]==='draft'?'<span class="cv dr">Draft</span>':'<span class="cv">\u2014</span>'}</td></tr>`).join('')}</tbody></table></div>`}).join('')}
     ${editable&&canInspect?`<div class="action"><h3>Finish inspection</h3><p class="muted" style="margin:0 0 10px">${allCov?'Every PO has an inspection. Send the packet to review.':'Submit at least one inspection for every PO first ('+covered(p)+' of '+pos(p).length+' done).'}</p><button class="btn pri big" id="complete" ${allCov?'':'disabled'}>${ic('check')} Inspection complete</button></div>`:''}
     ${stageAction(p)}
     </div></div>
@@ -90,11 +93,18 @@ function viewPacket(id){
     <div class="card" style="margin-top:18px"><h2>Activity</h2><ul class="timeline">${[...p.log].reverse().map(l=>`<li><b>${esc(l.what)}</b><span class="muted">${esc(l.who)} &middot; ${fdate(l.t)}</span></li>`).join('')}</ul></div></div>
   </div>`;
   $('#back').onclick=()=>nav(back[0]);
+  bindNextStep();
   const vp=$('#viewpdf');if(vp)vp.onclick=()=>openPdf(p);
   $$('.type').forEach(b=>b.onclick=()=>nav('/p/'+p.id+'/f/'+encodeURIComponent(b.dataset.po)+'/'+b.dataset.t));
   const act=async(path,body,msg)=>{try{const r=await api('POST','/api/packets/'+p.id+'/'+path,body||{});upsert(r);if(msg)toast(msg);viewPacket(p.id)}catch(e){toast(e.message,1)}};
   const c=$('#complete');if(c)c.onclick=()=>{const w=shortShipCheck(p);if(w&&!confirm(w))return;act('complete',null,'Sent to review')};
-  const ap=$('#approve');if(ap)ap.onclick=()=>act('approve',null,'Approved');
+  const ap=$('#approve');if(ap)ap.onclick=async()=>{
+    try{
+      const r=await api('POST','/api/packets/'+p.id+'/approve',{});upsert(r);viewPacket(p.id);
+      // taking an approval back is only possible while the review is still open (otherwise emails have gone out)
+      if(r.stage==='review')toast('Approved',0,{label:'Undo',fn:async()=>{try{upsert(await api('POST','/api/packets/'+p.id+'/unapprove',{}));toast('Approval taken back');viewPacket(p.id)}catch(e){toast(e.message,1)}}});
+      else toast('Approved');
+    }catch(e){toast(e.message,1)}};
   const r=$('#recv');if(r)r.onclick=()=>{const v=$('#d365').value.trim();if(!v)return toast('Enter the D365 receipt number',1);act('receive',{d365:v})};
   const a=$('#auth');if(a)a.onclick=()=>act('authorize',null,'Packet filed');
   const cr=$('#chrev');if(cr)cr.onclick=()=>reviewerModal(p);
@@ -125,7 +135,7 @@ function stageAction(p){
 
 /* ---- inspection form (tablet) ---- */
 function cell([k,l,kind],it,ro){
-  if(kind==='ok')return `<div class="fld"><label>${l}</label><div class="toggle" data-ok="${k}"><button type="button" class="ok ${it[k]==='ok'?'on':''}" ${ro}>OK</button><button type="button" class="bad ${it[k]==='bad'?'on':''}" ${ro}>Reject</button></div></div>`;
+  if(kind==='ok')return `<div class="fld"><label>${l}</label><div class="toggle" data-ok="${k}"><button type="button" class="ok ${it[k]==='ok'?'on':''}" ${ro}>OK</button><button type="button" class="bad ${it[k]==='bad'?'on':''}" ${ro}>Reject</button></div><select class="why" data-k="${k}_why" ${it[k]==='bad'?'':'hidden'} ${ro}><option value="">Reason...</option>${REASONS.map(r=>`<option ${it[k+'_why']===r?'selected':''}>${r}</option>`).join('')}</select></div>`;
   return `<div class="fld"><label>${l}</label><input data-k="${k}" ${kind==='text'?'':'inputmode="decimal"'} value="${esc(it[k]||'')}" ${ro}></div>`;
 }
 async function openTol(T){
@@ -154,6 +164,9 @@ async function viewForm(id,po,tk){
   let canEdit=!f.submitted&&(p.stage==='new'||p.stage==='inspecting')&&has('receiver','coordinator');
   let lockMsg='';
   if(canEdit){try{await api('POST',lockUrl(id,po,tk)+'/lock',{});startLock(id,po,tk)}catch(e){canEdit=false;lockMsg=e.message}}
+  let restored=false;
+  if(canEdit){const l=loadLocal(id,po,tk);if(l){f.items=l.items;f.date=l.date||f.date;restored=true}}   // entries saved on this tablet that never reached the server
+  const mm=canEdit?typeMismatch(rs,tk):'';
   const ro=canEdit?'':'readonly disabled';
   const ident=[...(T.k==='coil'?[['coil','Coil #']]:[]),['heat','Heat #'],['desc','Description'],['cc','NBS # (CC #)']];
   const used=()=>new Set(f.items.map(it=>it.src).filter(x=>x!==undefined&&x!==''));
@@ -163,6 +176,8 @@ async function viewForm(id,po,tk){
   <button class="crumb" id="back">${ic('back')} BOL ${esc(p.bol)}</button>
   <div class="pagehead"><div class="grow"><h1>${T.n} inspection</h1><p>${esc(po)} &middot; ${esc(p.vendor)} &middot; sheet ${T.form}</p></div>${f.submitted?'<span class="chip on" style="font-size:14px;padding:6px 14px">Submitted</span>':''}${p.hasPdf?`<button class="btn" id="viewpdf">${ic('file')} View packet PDF</button>`:''}</div>
   ${howTo('form')}
+  ${restored?'<div class="banner"><b>Restored your entries.</b> They were saved on this tablet and had not reached the server. They send automatically when the connection is back.</div>':''}
+  ${mm?`<div class="banner warn"><b>${esc(mm)}</b></div>`:''}
   ${lockMsg?`<div class="banner"><b>${esc(lockMsg)}</b> You can look, but not change it until they close it.${has('coordinator')?` <button class="btn sm" id="forcelock">Release their lock</button>`:''}</div>`:''}
   <div class="card" style="margin-bottom:14px"><div class="fh">
     <div class="fld"><label>PO #</label><input value="${esc(po)}" readonly></div><div class="fld"><label>BOL #</label><input value="${esc(p.bol)}" readonly></div>
@@ -171,7 +186,7 @@ async function viewForm(id,po,tk){
     ${T.tol?`<button class="tol" type="button" id="tol">${ic('info')} Tolerance tables for ${T.n.toLowerCase()} <span style="margin-left:auto;font-weight:normal">tap to open</span></button>`:''}</div>
   <div id="items"></div>
   ${canEdit?`<div class="addbar"><button class="btn big" id="addrow">${ic('plus')} Add blank row</button><button class="btn big" id="addrest" title="Adds one row for each line on the BOL that is not in this inspection yet, already filled with its heat, description and CC #">${ic('plus')} Add rows from BOL</button><span class="muted">Add rows from BOL: one row per BOL line not yet inspected, pre-filled.</span></div>`:''}
-  <div class="sticky"><button class="btn big" id="cancel">${canEdit?'Save draft':'Back'}</button>${canEdit?`<button class="btn big danger" id="discard">Discard</button>`:''}<span class="muted" id="saved"></span><span style="flex:1"></span>
+  <div class="sticky"><button class="btn big" id="cancel">${canEdit?'Save draft':'Back'}</button>${canEdit?`<button class="btn big danger" id="discard">Discard</button>`:''}<span class="muted" id="saved"></span><span class="muted" id="cnt"></span><span style="flex:1"></span>
    ${canEdit?`<button class="btn pri big" id="submit">${ic('check')} Submit inspection</button>`:(f.submitted&&(p.stage==='new'||p.stage==='inspecting')&&has('receiver','coordinator')?'<button class="btn big" id="reopen">Reopen to edit</button>':'')}</div>`;
 
   const itemHtml=(it,i)=>{
@@ -179,29 +194,46 @@ async function viewForm(id,po,tk){
     return `<div class="item" data-i="${i}">
     <div class="ih"><span class="n">${i+1}</span><span class="t">${esc(it.cc?'CC # '+it.cc:'New row')}</span><span class="s">${esc([it.heat&&'Heat '+it.heat,it.desc,(it.src!==undefined&&it.src!==''&&rs[+it.src]?.len)||''].filter(Boolean).join(' · '))}</span><span style="flex:1"></span>
     ${canEdit?`<select data-k="src"><option value="">Fill from packet item...</option>${rs.map((r,j)=>`<option value="${j}" ${String(it.src)===String(j)?'selected':''}>${esc(label(r))}${u.has(String(j))&&String(it.src)!==String(j)?' (added)':''}</option>`).join('')}</select>`:''}
-    ${canEdit&&f.items.length>1?`<button class="btn sm" data-rm="${i}">Remove</button>`:''}</div>
+    ${canEdit&&i>0?`<button class="btn sm" type="button" data-same="${i}" title="Copy the measurements and OK/Reject choices from the row above">Same as above</button>`:''}${canEdit&&f.items.length>1?`<button class="btn sm" data-rm="${i}">Remove</button>`:''}</div>
     <div class="ib"><div class="ida ${T.k==='coil'?'c4':'c3'}">${ident.map(([k,l])=>`<div class="fld"><label>${l}</label><input data-k="${k}" value="${esc(it[k]||'')}" ${ro}></div>`).join('')}</div>
     <div class="meas">${T.meas.filter(m=>m[2]!=='ok').map(m=>cell(m,it,ro)).join('')}</div>
     <div class="oks">${[...T.meas.filter(m=>m[2]==='ok'),...(T.post||[])].map(m=>cell(m,it,ro)).join('')}</div>
      <div class="fld" style="grid-column:1/-1"><label>Comments</label><textarea data-k="comments" rows="4" ${ro}>${esc(it.comments||'')}</textarea></div></div></div>`};
 
   const collect=()=>{f.date=$('#fdate').value;$$('#items .item').forEach(c=>{const it=f.items[+c.dataset.i];$$('[data-k]',c).forEach(i=>it[i.dataset.k]=i.value)})};
-  const push=async(submit)=>{collect();const r=await api('PUT',`/api/packets/${id}/forms/${encodeURIComponent(po)}/${tk}`,{date:f.date,items:f.items,submit});upsert(r)};
-  let t=null;const autosave=()=>{clearTimeout(t);$('#saved').textContent='Saving...';t=setTimeout(async()=>{try{await push(false);$('#saved').textContent='Draft saved'}catch(e){$('#saved').textContent=e.message}},700)};
+  // save on this tablet first, then send; a dropped connection keeps the entries and sends them later
+  const push=async(submit)=>{
+    collect();if(!submit)saveLocal(id,po,tk,f);
+    try{const r=await api('PUT',`/api/packets/${id}/forms/${encodeURIComponent(po)}/${tk}`,{date:f.date,items:f.items,submit});markSynced(id,po,tk);upsert(r);return r}
+    catch(e){if(isNetErr(e)){if(submit)throw new Error('No connection. Your entries are saved on this tablet. Submit again when you are back online.');return null}throw e}
+  };
+  let t=null;const autosave=()=>{clearTimeout(t);$('#saved').textContent='Saving...';t=setTimeout(async()=>{try{const r=await push(false);$('#saved').textContent=r?'Draft saved':'Saved on this tablet. Not sent yet (no connection).'}catch(e){$('#saved').textContent=e.message}},700)};
   const draw=()=>{
     $('#items').innerHTML=f.items.map(itemHtml).join('');
     enhanceItems({id,po,tk,T,f,canEdit,collect,autosave,draw});
     if(!canEdit)return;
-    $$('#items input').forEach(i=>i.addEventListener('input',autosave));
+    $$('#items input').forEach(i=>i.addEventListener('input',()=>{collect();updateCount();autosave()}));
+    $$('#items .why').forEach(sel=>sel.addEventListener('change',autosave));
+    $$('#items [data-same]').forEach(b=>b.onclick=()=>{
+      collect();const i=+b.dataset.same,it=f.items[i],pv=f.items[i-1];
+      [...T.meas,...(T.post||[])].forEach(m=>{it[m[0]]=pv[m[0]]||'';if(m[2]==='ok')it[m[0]+'_why']=pv[m[0]+'_why']||''});
+      draw();autosave()});
     $$('#items [data-k=src]').forEach(sel=>sel.addEventListener('change',()=>{
       collect();const i=+sel.closest('.item').dataset.i,it=f.items[i];
       if(sel.value!==''){const r=rs[+sel.value];it.src=sel.value;fromRow(r,it)}
       else it.src='';
       draw();autosave()}));
     $$('#items [data-rm]').forEach(b=>b.onclick=()=>{collect();f.items.splice(+b.dataset.rm,1);draw();autosave()});
-    $$('#items .toggle').forEach(tg=>$$('button',tg).forEach(b=>b.onclick=()=>{const it=f.items[+tg.closest('.item').dataset.i];const v=b.classList.contains('ok')?'ok':'bad';it[tg.dataset.ok]=it[tg.dataset.ok]===v?'':v;$$('button',tg).forEach(x=>x.classList.remove('on'));if(it[tg.dataset.ok])b.classList.add('on');autosave()}));
+    $$('#items .toggle').forEach(tg=>$$('button',tg).forEach(b=>b.onclick=()=>{const it=f.items[+tg.closest('.item').dataset.i];const v=b.classList.contains('ok')?'ok':'bad';it[tg.dataset.ok]=it[tg.dataset.ok]===v?'':v;$$('button',tg).forEach(x=>x.classList.remove('on'));if(it[tg.dataset.ok])b.classList.add('on');const why=tg.parentElement.querySelector('.why');if(why){why.hidden=it[tg.dataset.ok]!=='bad';if(why.hidden){why.value='';it[tg.dataset.ok+'_why']=''}}autosave()}));
   };
-  draw();
+  const updateCount=()=>{const k=f.items.filter(it=>it.heat||it.cc||it.desc).length;const c=$('#cnt');if(c)c.textContent=k+' row'+(k===1?'':'s')+' entered \u00b7 PO has '+rs.length+' item'+(rs.length===1?'':'s')};
+  draw();updateCount();
+  // Enter moves to the next field instead of leaving it
+  $('#items').addEventListener('keydown',e=>{
+    if(e.key!=='Enter'||e.target.tagName!=='INPUT')return;
+    const all=$$('#items input:not([readonly]):not([type=file]),#items textarea'),i=all.indexOf(e.target);
+    if(i>=0&&all[i+1]){e.preventDefault();all[i+1].focus()}
+  });
 
   $('#back').onclick=async()=>{if(canEdit){clearTimeout(t);try{await push(false)}catch(e){}}nav('/p/'+id)};
   const fl=$('#forcelock');if(fl)fl.onclick=async()=>{try{await api('POST',lockUrl(id,po,tk)+'/unlock',{force:true});toast('Lock released');viewForm(id,po,tk)}catch(e){toast(e.message,1)}};
@@ -215,14 +247,17 @@ async function viewForm(id,po,tk){
       if(f.items.length===1&&!Object.values(f.items[0]).some(v=>v))f.items=[];
       rest.forEach(([r,j])=>f.items.push(fromRow(r,{src:String(j)})));
       draw();autosave()};
-    $('#cancel').onclick=async()=>{clearTimeout(t);try{await push(false);toast('Draft saved');nav('/p/'+id)}catch(e){toast(e.message,1)}};
+    $('#cancel').onclick=async()=>{clearTimeout(t);try{const r=await push(false);toast(r?'Draft saved':'Saved on this tablet. It will send when the connection is back.');nav('/p/'+id)}catch(e){toast(e.message,1)}};
     $('#discard').onclick=async()=>{clearTimeout(t);collect();
       const has=f.items.some(it=>Object.entries(it).some(([k,v])=>k!=='src'&&k!=='skip'&&(Array.isArray(v)?v.length:String(v||'').trim())));
       if(has&&!confirm('Throw away everything entered on this inspection? The form goes back to Start inspection.'))return;
+      markSynced(id,po,tk);
       try{upsert(await api('PUT',`/api/packets/${id}/forms/${encodeURIComponent(po)}/${tk}`,{date:f.date,items:f.items,submit:false,discard:true}));toast('Discarded');nav('/p/'+id)}catch(e){toast(e.message,1)}};
     $('#submit').onclick=async()=>{clearTimeout(t);try{collect();
       if(!f.items.some(it=>it.heat||it.cc||it.desc))return toast('Fill in at least one row',1);
-      await push(true);toast('Inspection submitted');nav('/p/'+id)}catch(e){toast(e.message,1)}};
+      await push(true);nav('/p/'+id);
+      toast('Inspection submitted',0,{label:'Undo',fn:async()=>{try{upsert(await api('POST',`/api/packets/${id}/forms/${encodeURIComponent(po)}/${tk}/reopen`,{}));toast('Reopened');nav('/p/'+id+'/f/'+encodeURIComponent(po)+'/'+tk)}catch(e){toast(e.message,1)}}});
+    }catch(e){toast(e.message,1)}};
   }else{
     $('#cancel').onclick=()=>nav('/p/'+id);
     const rb=$('#reopen');if(rb)rb.onclick=async()=>{try{upsert(await api('POST',`/api/packets/${id}/forms/${encodeURIComponent(po)}/${tk}/reopen`,{}));viewForm(id,po,tk)}catch(e){toast(e.message,1)}};
@@ -284,7 +319,7 @@ function reviewersBlock(p){
 let LK=null;
 const lockUrl=(id,po,tk)=>`/api/packets/${id}/forms/${encodeURIComponent(po)}/${tk}`;
 // keep the form locked to this receiver while it is open (renewed every minute)
-function startLock(id,po,tk){stopLock();LK={id,po,tk,t:setInterval(()=>api('POST',lockUrl(id,po,tk)+'/lock',{}).catch(e=>toast(e.message,1)),60000)}}
+function startLock(id,po,tk){stopLock();LK={id,po,tk,t:setInterval(()=>api('POST',lockUrl(id,po,tk)+'/lock',{}).catch(e=>{if(!isNetErr(e))toast(e.message,1)}),60000)}}
 // release the form lock when leaving the form
 function stopLock(){
   if(!LK)return;clearInterval(LK.t);const u=lockUrl(LK.id,LK.po,LK.tk)+'/unlock';LK=null;

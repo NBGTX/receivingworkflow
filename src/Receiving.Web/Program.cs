@@ -312,7 +312,8 @@ pk.MapPut("/{id}/forms/{po}/{type}", (string id, string po, string type, ClaimsP
         foreach (var it in its.Select(i => i!.AsObject()))
         {
             if (it["skip"]?.ToString() is "True" or "true") continue;
-            var bad = it.Where(a => a.Value?.ToString() == "bad").Select(a => labels.GetValueOrDefault(a.Key, a.Key)).ToList();
+            // each rejected field is listed with the reason the receiver picked (stored as "<field>_why")
+            var bad = it.Where(a => a.Value?.ToString() == "bad").Select(a => labels.GetValueOrDefault(a.Key, a.Key) + (Str(it, a.Key + "_why") != "" ? " (" + Str(it, a.Key + "_why") + ")" : "")).ToList();
             if (bad.Count > 0) rej.Add($"CC {Str(it, "cc")} ({TypeName(type)}, PO {po}): {string.Join(", ", bad)}" + (Str(it, "comments") != "" ? " - " + Str(it, "comments") : ""));
         }
         if (rej.Count > 0) { AddLog(p.Data, "System", $"{rej.Count} rejected item(s) on the {TypeName(type)} inspection for {po}"); p.Save(); Notify("reject", p, me.Name, Origin(c), new Dictionary<string, string> { ["rejects"] = string.Join("\n", rej) }); }
@@ -361,6 +362,21 @@ pk.MapPost("/{id}/approve", (string id, ClaimsPrincipal u, HttpContext c) =>
     if (done) { p.Stage = "receive"; AddLog(p.Data, "System", "Review complete"); }
     p.Save();
     if (done) Notify("review_complete", p, me.Name, Origin(c));
+    return Results.Ok(p.ToJson());
+});
+
+// take back my own approval (the Undo after Approve); only while the packet is still in review
+pk.MapPost("/{id}/unapprove", (string id, ClaimsPrincipal u) =>
+{
+    var me = GetMe(u)!;
+    var p = LoadPacket(id); if (p == null) return Results.NotFound();
+    if (p.Stage != "review") return Results.Conflict(new { error = "The review is already complete." });
+    var apr = p.Data["approvals"]!.AsArray();
+    var mine = apr.FirstOrDefault(a => a!["id"]!.GetValue<string>() == me.Id);
+    if (mine == null) return Results.Ok(p.ToJson());
+    apr.Remove(mine);
+    AddLog(p.Data, me.Name, "Took back approval");
+    p.Save();
     return Results.Ok(p.ToJson());
 });
 

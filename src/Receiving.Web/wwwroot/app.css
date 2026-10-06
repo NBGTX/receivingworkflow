@@ -479,3 +479,23 @@ th{white-space:nowrap}
 .howto[open]>summary{border-bottom:1px solid var(--line)}
 .howbody{padding:12px 16px 14px;font-size:14.5px;line-height:1.5;color:var(--dg)}
 .howbody ul{margin:8px 0 0;padding-left:20px}.howbody li{margin:0 0 6px}
+
+/* connection pill, undo toast, next step, suggestions, coverage, reasons, review summary, checklist */
+.syncpill{border:0;border-radius:99px;padding:6px 12px;font-weight:bold;font-size:12px;background:#d9ead3;color:#1f5a22;cursor:pointer;min-height:32px}
+.syncpill.off{background:#fde2c8;color:#8a4b00}
+.toast-act{margin-left:16px;border:0;border-radius:99px;padding:6px 14px;background:#fff;color:var(--dg);font-weight:bold;cursor:pointer;min-height:36px}
+.nextstep{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:space-between;background:#e6f2ea;border:1.5px solid var(--mg);border-radius:12px;padding:12px 16px;margin:0 0 14px}
+.nextstep .ns-t{display:flex;flex-direction:column;gap:2px}.nextstep .ns-t b{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--mg)}.nextstep .ns-t span{font-size:17px;color:var(--dg);font-weight:bold}
+.type{position:relative}
+.type .sg{position:absolute;top:6px;right:8px;font-style:normal;font-size:10px;font-weight:bold;text-transform:uppercase;letter-spacing:.4px;color:var(--mg);background:#e6f2ea;border-radius:99px;padding:2px 8px}
+.type.sugg{border-color:var(--mg);box-shadow:0 0 0 1.5px var(--mg) inset}
+.cv{font-weight:bold;color:#a8a69c}.cv.ok{color:var(--mg);font-size:18px}.cv.dr{color:#a56b00;font-size:12px}
+.banner.warn{background:#fff4d6;border-color:#e3b25a}
+select.why{margin-top:8px;width:100%;min-height:44px;border:1.5px solid var(--red);border-radius:8px;padding:0 10px;font-size:15px;background:#fff}
+select.why[hidden]{display:none}
+.item .oks .fld{min-width:240px}
+.rs-row{padding:10px 0;border-top:1px solid var(--line)}.rs-row:first-of-type{border-top:0}
+.rs-bad{margin:6px 0 0;padding-left:20px;color:var(--red);font-size:14px}
+.checklist{list-style:none;margin:0;padding:0}.checklist li{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid #eeece6}
+.checklist .cx{width:24px;height:24px;border-radius:50%;border:2px solid #c9c7be;display:inline-grid;place-items:center;font-size:14px;color:#fff;flex:none}
+.checklist li.ok .cx{background:var(--mg);border-color:var(--mg)}.checklist .cl{flex:1}.checklist li.ok .cl{color:var(--mute)}

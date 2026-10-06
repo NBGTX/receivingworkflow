@@ -176,7 +176,7 @@ internal static class Features
                 var last = p.d["log"] is JsonArray lg && lg.Count > 0 ? long.Parse(lg[^1]!["t"]!.ToString()) : p.created;
                 return new { bol = p.bol, id = p.id, stage = p.stage, vendor = S(p.d, "vendor"), hours = Math.Round((now - last) / 3600000.0, 1) };
             }).Where(p => p.hours >= 24).OrderByDescending(p => p.hours).Take(20).ToList();
-            var byVendor = new Dictionary<string, (int items, int rej)>(); var rejects = new List<object>();
+            var byVendor = new Dictionary<string, (int items, int rej)>(); var rejects = new List<object>(); var reasons = new Dictionary<string, int>();
             foreach (var p in list.OrderByDescending(p => p.updated))
             {
                 var v = S(p.d, "vendor"); if (v == "") v = "(none)";
@@ -189,6 +189,7 @@ internal static class Features
                         if (it["skip"]?.ToString() is "True" or "true") continue;
                         var bad = it.Where(a => a.Value?.ToString() == "bad").Select(a => a.Key).ToList();
                         var cur = byVendor.GetValueOrDefault(v); byVendor[v] = (cur.items + 1, cur.rej + (bad.Count > 0 ? 1 : 0));
+                        foreach (var fld in bad) { var why = S(it, fld + "_why"); if (why == "") why = "(no reason given)"; reasons[why] = reasons.GetValueOrDefault(why) + 1; }
                         if (bad.Count > 0 && rejects.Count < 15) rejects.Add(new { bol = p.bol, id = p.id, vendor = v, po = kv.Key.Split('|')[0], sheet = kv.Key.Split('|')[1], cc = S(it, "cc"), fields = bad, date = S(f, "date") });
                     }
                 }
@@ -206,7 +207,7 @@ internal static class Features
                 averages = spans.Select(kv => new { step = kv.Key, hours = kv.Value.Count == 0 ? (double?)null : Math.Round(kv.Value.Average(), 1), samples = kv.Value.Count }),
                 stuck, weeks,
                 vendors = byVendor.Select(kv => new { vendor = kv.Key, items = kv.Value.items, rejected = kv.Value.rej }).OrderByDescending(v => v.rejected).ThenByDescending(v => v.items).Take(15),
-                rejects, total = list.Count
+                rejects, reasons = reasons.OrderByDescending(r => r.Value).Select(r => new { reason = r.Key, n = r.Value }), total = list.Count
             });
         });
 

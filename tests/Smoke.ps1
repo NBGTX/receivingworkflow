@@ -69,9 +69,10 @@ try {
   Check 'opening a form and leaving it blank leaves no draft' { $x = Call $r1 PUT $f @{ date = '2026-10-05'; items = @(@{}); submit = $false }; $x.forms.PSObject.Properties.Name -notcontains 'TX-9000001|shape' }
   Check 'a form with entries is kept as a draft' { $x = Call $r1 PUT $f @{ date = '2026-10-05'; items = @(@{ heat = 'H1' }); submit = $false }; $x.forms.PSObject.Properties.Name -contains 'TX-9000001|shape' }
   Check 'discard removes the draft' { $x = Call $r1 PUT $f @{ date = '2026-10-05'; items = @(@{ heat = 'H1' }); submit = $false; discard = $true }; $x.forms.PSObject.Properties.Name -notcontains 'TX-9000001|shape' }
-  Check 'first receiver submits (one reject)' { $x = Call $r1 PUT $f @{ date = '2026-10-05'; items = @(@{ heat = 'H100'; cc = '900001'; desc = 'W12x30'; qty = '6'; visual = 'bad'; cert = 'ok' }); submit = $true }; $x.stage -eq 'inspecting' }
+  Check 'first receiver submits (one reject)' { $x = Call $r1 PUT $f @{ date = '2026-10-05'; items = @(@{ heat = 'H100'; cc = '900001'; desc = 'W12x30'; qty = '6'; visual = 'bad'; visual_why = 'Rust or corrosion'; cert = 'ok' }); submit = $true }; $x.stage -eq 'inspecting' }
   Check 'reject is logged' { @((Call $adm GET "/api/packets/$id").log | Where-Object { $_.what -like '*rejected*' }).Count -ge 1 }
   Check 'complete moves it to review' { (Call $r1 POST "/api/packets/$id/complete" @{}).stage -eq 'review' }
+  Check 'a reviewer can take their approval back' { $null = Call $rv POST "/api/packets/$id/approve" @{}; $b = Call $rv POST "/api/packets/$id/unapprove" @{}; @($b.approvals | Where-Object { $_ }).Count -eq 0 -and $b.stage -eq 'review' }
   Check 'every reviewer must approve (second one moves it on)' { (Call $rv POST "/api/packets/$id/approve" @{}).stage -eq 'review' -and (Call $rd POST "/api/packets/$id/approve" @{}).stage -eq 'receive' }
   Check 'receive needs a D365 number' { (Status (Call $adm POST "/api/packets/$id/receive" @{ d365 = '' })) -eq 400 }
   Check 'receive then authorize files it' { $null = Call $adm POST "/api/packets/$id/receive" @{ d365 = 'PR-SMOKE' }; (Call $adm POST "/api/packets/$id/authorize" @{}).stage -eq 'filed' }
@@ -90,6 +91,7 @@ try {
   Check 'backup runs and lists' { $b = Call $adm POST '/api/admin/backups/run' @{}; $b.file -and @((Call $adm GET '/api/admin/backups').files).Count -ge 1 }
   Check 'status page answers' { (Call $adm GET '/api/admin/status').users -ge 3 }
   Check 'audit search answers' { @((Call $adm GET '/api/admin/audit?q=smoke').rows).Count -ge 1 }
+  Check 'reject reasons show on the dashboard' { @((Call $adm GET '/api/reports/summary').reasons | Where-Object { $_.reason -eq 'Rust or corrosion' }).Count -eq 1 }
   Check 'reviewer can read the dashboard data' { (Call $rv GET '/api/reports/summary').total -ge 1 }
   Check 'receiver cannot read the dashboard data' { (Status (Call $r1 GET '/api/reports/summary')) -eq 403 }
   Check 'receiver cannot open admin settings' { (Status (Call $r1 GET '/api/admin/settings')) -eq 403 }

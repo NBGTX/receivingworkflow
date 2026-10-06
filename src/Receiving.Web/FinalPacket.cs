@@ -271,7 +271,7 @@ public static class FinalPacket
             Head(false); var zebra = false;
             foreach (var it in items)
             {
-                var cell = cols.Select(c => Wrap(iw.G, Val(S(it, c.key)), F(8.5, c.key == "cc"), c.w - 7)).ToList();
+                var cell = cols.Select(c => Wrap(iw.G, Val(S(it, c.key)) + (S(it, c.key) == "bad" && S(it, c.key + "_why") != "" ? " - " + S(it, c.key + "_why") : ""), F(8.5, c.key == "cc"), c.w - 7)).ToList();
                 var h = Math.Max(1, cell.Max(l => l.Count)) * 11 + 9;
                 if (iw.Y + h > iw.H - 44) { Head(true); zebra = false; }
                 if (zebra) Fill(iw.G, Gray, 36, iw.Y, tableW, h);
