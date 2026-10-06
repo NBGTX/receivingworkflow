@@ -61,11 +61,16 @@ icacls $DataPath /grant "IIS AppPool\${pool}:(OI)(CI)M" /T | Out-Null
 icacls $AppPath  /grant "IIS AppPool\${pool}:(OI)(CI)RX" /T | Out-Null
 Write-Host "App pool 'IIS AppPool\$pool' can write to $DataPath"
 
-Step "Windows sign-in for admins (anonymous stays on for the PIN screens)"
+Step "Windows sign-in only on the admin sign-in address (PIN users are never asked for Windows credentials)"
 try {
+  # The whole site is anonymous. IIS adds a Windows challenge to EVERY 401 answer when Windows authentication is on,
+  # which makes browsers ask PIN users for a Windows password. So it is switched on for one URL only.
   Set-WebConfigurationProperty -Filter '/system.webServer/security/authentication/anonymousAuthentication' -Name enabled -Value $true  -PSPath 'IIS:\' -Location $SiteName
-  Set-WebConfigurationProperty -Filter '/system.webServer/security/authentication/windowsAuthentication'   -Name enabled -Value $true  -PSPath 'IIS:\' -Location $SiteName
-  Write-Host "Anonymous + Windows authentication enabled for $SiteName"
+  Set-WebConfigurationProperty -Filter '/system.webServer/security/authentication/windowsAuthentication'   -Name enabled -Value $false -PSPath 'IIS:\' -Location $SiteName
+  $adminPath = "$SiteName/api/auth/windows"
+  Set-WebConfigurationProperty -Filter '/system.webServer/security/authentication/anonymousAuthentication' -Name enabled -Value $true  -PSPath 'IIS:\' -Location $adminPath
+  Set-WebConfigurationProperty -Filter '/system.webServer/security/authentication/windowsAuthentication'   -Name enabled -Value $true  -PSPath 'IIS:\' -Location $adminPath
+  Write-Host "Site: anonymous only. Windows authentication: only on /api/auth/windows"
 } catch {
   Write-Host "Could not set authentication from script: $($_.Exception.Message)" -ForegroundColor Yellow
   Write-Host "Fix: IIS Manager > site '$SiteName' > Authentication > enable Anonymous and Windows Authentication." -ForegroundColor Yellow
