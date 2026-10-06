@@ -403,3 +403,4 @@ input.warnfld{border-color:#e3b25a !important;background:var(--amberbg) !importa
 .item .ida.c4{grid-template-columns:minmax(140px,1fr) minmax(140px,1fr) minmax(220px,3fr) minmax(140px,1fr)}
 .item .meas{grid-column:1/-1;display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
 @media(max-width:700px){.item .ida,.item .ida.c4{grid-template-columns:1fr 1fr}.item .ida .fld:nth-child(2){grid-column:1/-1}}
+.item .oks{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:14px}.item .oks:empty{display:none}
