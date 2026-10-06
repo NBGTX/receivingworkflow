@@ -19,6 +19,8 @@ The default is `http://10.9.33.141:8091/`. To build a different one in: `gradlew
 
 Order the app uses at start: Intune managed setting, then an address typed on the tablet, then the built-in default. If the server cannot be reached the app shows a "Cannot reach" page with **Try again** and **Change server address**.
 
+**Changing the address on a tablet at any time:** press and hold the top-left corner of the screen (over the "Steel Receiving" title) for 3 seconds, enter the admin PIN, then type the new address. **Use default** clears it. The default PIN is `2580`; build another in with `-PadminPin=1234`, or have Intune set `admin_pin` (string). If Intune sets `server_url`, the box shows that address and cannot override it.
+
 ## Deploy with Intune
 
 - Upload the signed `.apk` as a line-of-business app (Apps > Android > Add), or publish it as a private app in managed Google Play if your tablets are Android Enterprise devices. Which one applies depends on how the tablets are enrolled.

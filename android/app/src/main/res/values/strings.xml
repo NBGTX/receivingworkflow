@@ -2,4 +2,6 @@
     <string name="app_name">Steel Receiving</string>
     <string name="restriction_server_url">Server address</string>
     <string name="restriction_server_url_desc">Full address of the Steel Receiving server, for example http://10.9.33.141:8091/</string>
+    <string name="restriction_admin_pin">Admin PIN</string>
+    <string name="restriction_admin_pin_desc">Digits that unlock the hidden server-address box (press and hold the top-left corner for 3 seconds)</string>
 </resources>

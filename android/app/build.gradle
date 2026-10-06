@@ -15,6 +15,9 @@ android {
         // Address of the server. Intune can override it per device with the managed app setting "server_url".
         // Build another address in with:  gradlew assembleRelease -PserverUrl=http://host:port/
         buildConfigField 'String', 'SERVER_URL', "\"${project.findProperty('serverUrl') ?: 'http://10.9.33.141:8091/'}\""
+        // PIN for the hidden server-address box (press and hold the top-left corner for 3 seconds).
+        // Intune can set "admin_pin" instead. Build another with -PadminPin=1234
+        buildConfigField 'String', 'ADMIN_PIN', "\"${project.findProperty('adminPin') ?: '2580'}\""
     }
 
     buildFeatures { buildConfig true }

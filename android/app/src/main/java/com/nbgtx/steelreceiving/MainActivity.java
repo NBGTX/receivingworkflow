@@ -15,6 +15,10 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.text.InputType;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
@@ -29,6 +33,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
@@ -60,7 +65,10 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);   // dock tablets stay awake while the app is open
         web = new WebView(this);
-        setContentView(web);
+        FrameLayout root = new FrameLayout(this);
+        root.addView(web, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        root.addView(adminCorner(), new FrameLayout.LayoutParams(dp(170), dp(64), Gravity.TOP | Gravity.START));
+        setContentView(root);
         serverUrl = resolveServerUrl();
         setupWebView();
         ContextCompat.registerReceiver(this, downloadDone, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_EXPORTED);
@@ -68,14 +76,50 @@ public class MainActivity extends AppCompatActivity {
         else web.loadUrl(serverUrl);
     }
 
-    /** Order of precedence: Intune managed setting, then what was typed on the tablet, then the built-in default. */
-    private String resolveServerUrl() {
-        String url = null;
+    private int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density); }
+
+    /** A value pushed by Intune app configuration, or null. */
+    private String managed(String key) {
         try {
             RestrictionsManager rm = (RestrictionsManager) getSystemService(Context.RESTRICTIONS_SERVICE);
             Bundle b = rm == null ? null : rm.getApplicationRestrictions();
-            if (b != null) url = b.getString("server_url");
-        } catch (Exception ignored) { }
+            String v = b == null ? null : b.getString(key);
+            return v == null || v.trim().isEmpty() ? null : v.trim();
+        } catch (Exception e) { return null; }
+    }
+
+    /**
+     * Invisible touch area over the web page's "Steel Receiving" title (nothing there is clickable).
+     * Press and hold it for 3 seconds to open the PIN box that leads to the server address.
+     */
+    private View adminCorner() {
+        View v = new View(this);
+        Handler h = new Handler(Looper.getMainLooper());
+        Runnable open = this::askPin;
+        v.setOnTouchListener((view, e) -> {
+            int a = e.getActionMasked();
+            if (a == MotionEvent.ACTION_DOWN) h.postDelayed(open, 3000);
+            else if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) h.removeCallbacks(open);
+            return true;
+        });
+        return v;
+    }
+
+    private void askPin() {
+        EditText e = new EditText(this);
+        e.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        e.setHint("Admin PIN");
+        new AlertDialog.Builder(this).setTitle("Admin").setView(e)
+            .setPositiveButton("OK", (d, w) -> {
+                String pin = managed("admin_pin") != null ? managed("admin_pin") : BuildConfig.ADMIN_PIN;
+                if (pin.equals(e.getText().toString().trim())) askServer();
+                else Toast.makeText(this, "Wrong PIN", Toast.LENGTH_SHORT).show();
+            }).setNegativeButton("Cancel", null).show();
+    }
+
+    /** Order of precedence: Intune managed setting, then what was typed on the tablet, then the built-in default. */
+    private String resolveServerUrl() {
+        String url = managed("server_url");
         if (url == null || url.trim().isEmpty()) url = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_URL, null);
         if (url == null || url.trim().isEmpty()) url = BuildConfig.SERVER_URL;
         url = url.trim();
@@ -95,7 +139,7 @@ public class MainActivity extends AppCompatActivity {
 
         web.addJavascriptInterface(new Object() {
             @JavascriptInterface public void retry() { runOnUiThread(() -> web.loadUrl(serverUrl)); }
-            @JavascriptInterface public void changeServer() { runOnUiThread(MainActivity.this::askServer); }
+            @JavascriptInterface public void changeServer() { runOnUiThread(MainActivity.this::askPin); }
         }, "Shell");
 
         web.setWebViewClient(new WebViewClient() {
@@ -229,12 +273,24 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void askServer() {
+        if (managed("server_url") != null) {
+            new AlertDialog.Builder(this).setTitle("Server address")
+                .setMessage("This tablet's server address is set by your administrator (Intune):
+
+" + serverUrl)
+                .setPositiveButton("OK", null).show();
+            return;
+        }
         EditText e = new EditText(this);
         e.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
         e.setText(serverUrl);
         new AlertDialog.Builder(this).setTitle("Server address").setView(e)
             .setPositiveButton("Save", (d, w) -> {
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_URL, e.getText().toString()).apply();
+                serverUrl = resolveServerUrl();
+                web.loadUrl(serverUrl);
+            }).setNeutralButton("Use default", (d, w) -> {
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(KEY_URL).apply();
                 serverUrl = resolveServerUrl();
                 web.loadUrl(serverUrl);
             }).setNegativeButton("Cancel", null).show();

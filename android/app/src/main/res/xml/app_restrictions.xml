@@ -7,4 +7,10 @@
         android:description="@string/restriction_server_url_desc"
         android:restrictionType="string"
         android:defaultValue="" />
+    <restriction
+        android:key="admin_pin"
+        android:title="@string/restriction_admin_pin"
+        android:description="@string/restriction_admin_pin_desc"
+        android:restrictionType="string"
+        android:defaultValue="" />
 </restrictions>
