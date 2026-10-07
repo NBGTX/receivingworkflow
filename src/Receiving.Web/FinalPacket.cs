@@ -168,7 +168,7 @@ public static class FinalPacket
 
         // items table
         Heading("ITEMS ON THIS PACKET", rows.Count + " line" + (rows.Count == 1 ? "" : "s"));
-        var itemCols = new (string h, string k, double w)[] { ("PO #", "po", 78), ("Heat #", "heat", 66), ("Coil / bundle #", "coil", 82), ("CC #", "cc", 52), ("Description", "desc", 148), ("Length", "len", 56), ("Weight", "wt", 50) };
+        var itemCols = new (string h, string k, double w)[] { ("PO #", "po", 78), ("Heat #", "heat", 66), ("Mill coil / bundle #", "coil", 82), ("CC #", "cc", 52), ("Description", "desc", 148), ("Length", "len", 56), ("Weight", "wt", 50) };
         void TableHead((string h, string k, double w)[] cols, double x0, double fontSize)
         {
             Ensure(30);

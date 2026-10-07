@@ -1,5 +1,5 @@
 /* ---------------- intake: new packet w/ click-to-index ---------------- */
-const COLS=[['po','PO #'],['heat','Heat #'],['coil','Coil / bundle #'],['cc','CC # (NBS#)'],['desc','Description'],['len','Length'],['wt','Weight']];
+const COLS=[['po','PO #'],['heat','Heat #'],['coil','Mill coil / bundle #'],['cc','CC # (NBS#)'],['desc','Description'],['len','Length'],['wt','Weight']];
 const Q=2;
 async function fitPage(){
   const pg=await pdf.getPage(pageNo),r=((pg.rotate||0)+(rot[pageNo]||0))%360,v=pg.getViewport({scale:1,rotation:r});

@@ -232,7 +232,7 @@ async function tabStatus(){
 async function tabIntegrations(){
   const g=ST.general;let dw={columns:[],sources:[]},po={lines:0,pos:0,sample:[]};
   try{[dw,po]=await Promise.all([api('GET','/api/admin/docuware'),api('GET','/api/admin/po-list')])}catch(e){}
-  const SRC={bol:'BOL #',vendor:'Vendor',ship:'Ship date',carrier:'Carrier',po:'PO #',heat:'Heat #',coil:'Coil / bundle #',cc:'CC # (NBS#)',desc:'Description',len:'Length',wt:'Weight',d365:'D365 receipt #',authBy:'Authorized by',authAt:'Authorized on',const:'Fixed text'};
+  const SRC={bol:'BOL #',vendor:'Vendor',ship:'Ship date',carrier:'Carrier',po:'PO #',heat:'Heat #',coil:'Mill coil / bundle #',cc:'CC # (NBS#)',desc:'Description',len:'Length',wt:'Weight',d365:'D365 receipt #',authBy:'Authorized by',authAt:'Authorized on',const:'Fixed text'};
   let cols=dw.columns.map(c=>({...c}));
   const drawCols=()=>{
     $('#dwrows').innerHTML=cols.map((c,i)=>`<tr><td><input data-dc="${i}" data-f="header" value="${esc(c.header)}"></td><td><select data-dc="${i}" data-f="source">${dw.sources.map(k=>`<option value="${k}" ${c.source===k?'selected':''}>${SRC[k]||k}</option>`).join('')}</select></td><td><input data-dc="${i}" data-f="const" value="${esc(c.const||'')}" ${c.source==='const'?'':'disabled'} placeholder="${c.source==='const'?'Text to put in every row':''}"></td>
