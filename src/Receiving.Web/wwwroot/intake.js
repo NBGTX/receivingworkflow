@@ -155,7 +155,6 @@ async function saveNew(){
     $('#save').disabled=true;
     const p=await api('POST','/api/packets',{bol,vendor:$('[data-f=vendor]').value.trim(),ship:$('[data-f=ship]').value.trim(),carrier:$('[data-f=carrier]').value.trim(),rows});
     await api('POST','/api/packets/'+p.id+'/pdf',curBuf,'application/pdf');
-    const vend=$('[data-f=vendor]').value.trim();if(vend&&Object.keys(picks).length){try{await api('PUT','/api/layouts/'+encodeURIComponent(vend),{v:1,picks})}catch(e){}}
     toast('Packet sent to receivers');nav('/p/'+p.id);
   }catch(e){m.textContent=e.message;$('#save').disabled=false}
 }

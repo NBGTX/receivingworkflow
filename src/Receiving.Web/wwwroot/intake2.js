@@ -4,7 +4,7 @@
 const RX={
   po:/\bT[XKR][-–—_ ]?\s?([0-9OoDQ]{7})\b/i,
   cc:/\bC\s?C\s?#?\s*[:.]?\s*(\d{5,7})\b/i,
-  heat:/\bheat\s*(?:numbers?|#|no\.?)?\s*[:#.]?\s*([A-Za-z0-9]{5,9})/i,
+  heat:/\bheat\s*(?:numbers?|#|no\.?)?\s*[:#.]?\s*([A-Za-z0-9]{5,12})/i,
   coil:/\b(\d{7}\.\d{4})\b/,
   bundle:/^\s*(\d{8})\b/,
   len:/\b(\d{1,3})\s*['’°]\s*-?\s*(\d{1,2})?\s*["”]?/,
@@ -17,11 +17,15 @@ const fixPo=d=>'TX-'+d.replace(/[OoDQ]/g,'0');
 function parseBol(text){
   const lines=text.split('\n').map(s=>s.replace(/\s+/g,' ').trim()).filter(Boolean);
   const full=lines.join('\n'),out={bol:'',vendor:'',ship:'',carrier:'',pos:[],rows:[]};
-  let m=full.match(/(?:bill\s+of\s+lading|b\.?\s?o\.?\s?l\.?)\s*(?:no\.?|number|#)\s*[:.#]?\s*(\d{5,10})/i)||full.match(/bill\s+of\s+lading\s*no\.?[\s\S]{0,140}?\b(\d{6,8})\b/i);if(m)out.bol=m[1];
+  let m=full.match(/(?:bill\s+of\s+lading|b\.?\s?o\.?\s?l\.?)\s*(?:no\.?|number|#)\s*[:.#]?\s*([A-Z]{0,4}-?\d{5,10})/i)||full.match(/bill\s+of\s+lading\s*no\.?[\s\S]{0,140}?\b(\d{6,8})\b/i)||full.match(/\bBOL\s*(?:no\.?|#)?\s*[:.]?\s*([A-Z]{0,4}-?\d{5,10})\b/);if(m)out.bol=m[1];
   m=full.match(/(?:ship(?:ped|ping)?\s*date|date)\s*[:.]?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i)||full.match(/\b(\d{1,2}\/\d{1,2}\/\d{2,4})\b/);if(m)out.ship=m[1];
   m=full.match(/(?:^|\n|\s)from\s*[:.]?\s*([^\n]{4,70})/i);
   if(m)out.vendor=m[1].replace(/\b(telephone|phone|tel|date|at)\b.*$/i,'').replace(/\s{2,}.*$/,'').replace(/[=~_|]+/g,' ').replace(/\s*-\s*/g,' - ').replace(/\s{2,}/g,' ').replace(/[\s,.:;-]+$/,'').trim();
   m=full.match(/\bCARRIER[ \t]*:[ \t]*([A-Za-z][^\n]{2,60})/)||full.match(/^[ \t]*carrier[ \t]*[:.]?[ \t]*([A-Za-z0-9][^\n]{2,140})$/im);if(m)out.carrier=m[1].replace(/\b(bol|vehicle|trailer|load|car or)\b.*$/i,'').trim();
+  // a "Ship From" that is really boilerplate: fall back to the company name printed at the top of the page
+  if(!out.vendor||/\b(subject|section|terms|conditions)\b/i.test(out.vendor)||out.vendor.length>45){
+    const top=lines.slice(0,10).join('\n').match(/\bNUCOR\s+STEEL\s+[A-Z]{3,}\b/);if(top)out.vendor=top[0];
+  }
   out.pos=[...new Set([...full.matchAll(new RegExp(RX.po.source,'gi'))].map(x=>fixPo(x[1])))];
 
   let cur=null,lastPo='';
@@ -83,12 +87,8 @@ async function scanPage(){
   const myPage=pageNo,box=$('#sug');if(!box)return;
   box.innerHTML='<div class="sug busy">Reading this page for suggestions. You can keep working.</div>';
   try{
-    const pg=await pdf.getPage(myPage);
-    const vp=pg.getViewport({scale:2.6,rotation:((pg.rotate||0)+(rot[myPage]||0))%360});
-    const c=document.createElement('canvas');c.width=Math.floor(vp.width);c.height=Math.floor(vp.height);
-    await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
-    const text=await ocrQ(async()=>{const w=await getWorker();await w.setParameters({tessedit_pageseg_mode:'3'});const {data}=await w.recognize(c);return data.text});
-    SUG=parseBol(text);SUG.text=text;SUG.page=myPage;await applyFixes();autoFill();showSuggestions();
+    const text=await scanText(myPage);
+    SUG=parseBol(text);SUG.text=text;SUG.page=myPage;await matchFormat(SUG);await applyFixes();autoFill();showSuggestions();
   }catch(e){box.innerHTML='<div class="sug err">Could not read the page: '+esc(e.message)+'</div>'}
 }
 
@@ -96,8 +96,9 @@ async function scanPage(){
 function showSuggestions(){
   const box=$('#sug');if(!box||!SUG)return;
   const chip=(label,val,field)=>val?`<button class="chip sg" data-sgf="${field}" data-sgv="${esc(val)}">${esc(label)} <b>${esc(val)}</b></button>`:'';
-  const hit=layoutList.find(l=>SUG.text.toLowerCase().includes(l.name.toLowerCase()));
-  box.innerHTML=`<div class="sug"><div class="sgh">Suggestions from the page <span class="muted">(check each one)</span> <button class="btn sm" id="rescan">Read this page</button></div>
+  const hit=(SUG.layout&&layoutList.find(l=>l.name===SUG.layout))||layoutList.find(l=>SUG.text.toLowerCase().includes(l.name.toLowerCase()));
+  const fmt=SUG.layout?`<div class="fmt ok">Recognised the <b>${esc(SUG.layout)}</b> format you taught earlier${SUG.ruled&&SUG.ruled.length?'; read '+SUG.ruled.map(f=>({bol:'BOL #',ship:'ship date',carrier:'carrier'}[f]||f)).join(', ')+' by its label':''}.</div>`:'<div class="fmt">New format. Fix any field that is wrong; when you save, the app remembers how this vendor lays out its BOL.</div>';
+  box.innerHTML=`<div class="sug"><div class="sgh">Suggestions from the page <span class="muted">(check each one)</span> <button class="btn sm" id="rescan">Read this page</button></div>${fmt}
    <div class="sgc">${chip('BOL #',SUG.bol,'bol')}${chip('Vendor',SUG.vendor,'vendor')}${chip('Ship date',SUG.ship,'ship')}${chip('Carrier',SUG.carrier,'carrier')}${SUG.pos.map(p=>`<button class="chip sg" data-sgf="po" data-sgv="${esc(p)}">PO <b>${esc(p)}</b></button>`).join('')}</div>
    <div class="bar" style="margin:8px 0 0">${SUG.rows.length?`<button class="btn sm pri" id="sgrows">${$$('#rows tr').some(tr=>$$('input',tr).some(i=>i.value))?'Add':'Fill'} ${SUG.rows.length} row${SUG.rows.length===1?'':'s'} from the page</button>`:'<span class="muted">No item rows recognized on this page.</span>'}
    <button class="btn sm" id="sgheat">Check heats against the MTR pages</button>
@@ -185,8 +186,9 @@ saveNew=async function(){
   if(poMissing.length&&!confirm('These POs are not on the PO list from D365:\n\n'+poMissing.join(', ')+'\n\nSave the packet anyway?'))return;
   const rowsBefore=$$('#rows tr').map(tr=>{const o={};$$('input',tr).forEach(i=>o[i.dataset.f]=i.value.trim());return o}).filter(r=>r.po);
   const vend=$('[data-f=vendor]')?.value.trim(),sug=SUG;
+  const plan=vend?await planLearn(sug):null;           // what to remember, worked out while the PDF is still open
   await _saveNew();
-  if(location.hash.startsWith('#/p/')&&vend&&sug)learnFixes(vend,sug,rowsBefore);
+  if(location.hash.startsWith('#/p/')&&vend){await commitLearn(vend,plan);if(sug)learnFixes(vend,sug,rowsBefore)}
 };
 
 /* ---------- learn from corrections ---------- */
@@ -206,7 +208,7 @@ async function learnFixes(vendor,sug,finalRows){
 // apply remembered corrections to new suggestions
 async function applyFixes(){
   SUG.fixed=0;
-  const hit=layoutList.find(l=>SUG.text.toLowerCase().includes(l.name.toLowerCase())||(SUG.vendor&&SUG.vendor.toLowerCase().includes(l.name.toLowerCase())));
+  const hit=(SUG.layout&&layoutList.find(l=>l.name===SUG.layout))||layoutList.find(l=>SUG.text.toLowerCase().includes(l.name.toLowerCase())||(SUG.vendor&&SUG.vendor.toLowerCase().includes(l.name.toLowerCase())));
   if(!hit)return;
   try{
     const lay=await api('GET','/api/layouts/'+encodeURIComponent(hit.name));const fx=lay.fixes||{};

@@ -22,7 +22,8 @@ const HOW={
   '2. The page is read automatically. BOL, vendor, ship date, carrier and the item rows fill in. <b>Compare with the PDF</b>: handwriting and poor scans read badly.',
   '3. To fix a field, click it, then drag a box around the right text on the PDF. The dotted pills are other readings you can tap. To fill a whole column, click the first cell of that column in the table, then drag one box around the whole column on the PDF: it fills the rows downward by itself.',
   '4. <b>Check heats against the MTR pages</b> and the saved layouts help with repeat vendors. A saved layout remembers where this vendor puts things.',
-  '5. <b>Save and send to receivers</b>. The receivers are emailed once the PDF is stored.']],
+  '5. <b>Save and send to receivers</b>. The receivers are emailed once the PDF is stored.',
+  '<b>Teaching it a new vendor:</b> the first time a vendor’s BOL comes in, fix any wrong field (or drag a box around the right text). When you save, the app remembers the vendor’s format: which label sits next to the BOL #, ship date and carrier, where you drew boxes, and what the top of the page looks like. The next BOL in that format is recognised on its own and the labelled fields fill in correctly. Digital (typed) PDFs are read from their own text, which is far more accurate than a scan. Make sure the Vendor field holds the vendor’s name before you save, because the format is stored under it.']],
  reviews:['Reviews',[
   'Packets whose inspections are finished and waiting for approval. <b>Waiting for you</b> lists the ones that need your approval.',
   'Open a packet, look at the inspections and the packet PDF, then press <b>Approve</b>. The packet moves on when every named reviewer has approved.',

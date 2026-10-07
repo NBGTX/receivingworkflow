@@ -530,3 +530,7 @@ td select,.cols select{min-height:44px;width:100%}
 /* intake: copy-down arrow in column headings */
 .cells th .fd{border:1px solid #b9c8bf;background:#fff;color:var(--mg);border-radius:4px;font-size:11px;line-height:1;padding:1px 4px;margin-left:2px;cursor:pointer;vertical-align:middle}
 .cells th .fd:hover{background:var(--mg);color:#fff}
+
+/* intake: recognised / new format line */
+.fmt{margin:6px 0 8px;font-size:13px;color:var(--mute)}
+.fmt.ok{color:var(--mg)}.fmt.ok b{color:var(--dg)}
