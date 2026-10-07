@@ -16,12 +16,13 @@ function viewNew(){
   <div class="pagehead"><div class="grow"><h1>New packet</h1><p>Open the packet PDF, or pick several files at once to join them. Then click a field and drag a box around the text to fill it.</p></div></div>${howTo('new')}
   <div class="ix">
    <div class="card"><h2>Packet PDF</h2>
-    <div class="vtool"><input type="file" id="file" accept="application/pdf" multiple style="font-size:13px" title="Pick several files to merge them in the order shown"></div>
+    <div class="dropzone" id="drop"><label class="btn pri big" for="file">${ic('file')} Choose PDF files</label><span class="muted">or drop them here. Several files are joined in the order you pick them.</span><input type="file" id="file" accept="application/pdf" multiple hidden></div>
+    <div class="muted" id="fname" style="margin:0 0 10px"></div>
     <div class="vtool"><button class="btn sm" id="prev">&lsaquo;</button><span class="num" id="pg">0 / 0</span><button class="btn sm" id="next">&rsaquo;</button>
      <button class="btn sm" id="rotL">${ic('rot')} Rotate</button><button class="btn sm" id="zo">&minus;</button><span class="num" id="zl">100%</span><button class="btn sm" id="zi">+</button><button class="btn sm" id="zfit">Fit page</button></div>
     <div id="stage"><div id="wrap"><canvas id="cv" width="10" height="10"></canvas><div id="ov"></div></div></div></div>
    <div class="card"><h2>Index packet</h2>
-    <div class="vtool"><label class="ck"><input type="checkbox" id="down"> Fill down: drag around a column to fill rows</label><label class="ck"><input type="checkbox" id="auto" checked> Auto-advance</label></div>
+    <div class="vtool"><label class="ck"><input type="checkbox" id="auto" checked> Auto-advance to the next field</label></div>
     <div id="ocr">Open a PDF to begin.</div>
     <div class="fh fld sm">
      <div><label>BOL #</label><input data-f="bol"></div><div><label>Vendor</label><input data-f="vendor"></div>
@@ -31,8 +32,11 @@ function viewNew(){
     <p class="muted" id="msg" style="margin:6px 0 0;font-size:13px"></p></div>
   </div>`;
   const ov=$('#ov');
-  $('#file').onchange=async e=>{
-    const files=[...e.target.files];if(!files.length)return;
+  // open one PDF, or join several in the order given (used by the chooser and by drag and drop)
+  const openFiles=async files=>{
+    files=files.filter(f=>/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name));
+    if(!files.length)return ocrs('Only PDF files can be opened here.',2);
+    $('#fname').textContent=files.length===1?files[0].name:files.length+' files: '+files.map(f=>f.name).join(', ');
     if(files.length===1)return files[0].arrayBuffer().then(openData);
     ocrs('Joining '+files.length+' PDFs in the order picked...',1);
     try{
@@ -43,6 +47,11 @@ function viewNew(){
       ocrs('Joined '+files.length+' files ('+files.map(f=>f.name).join(', ')+'). Pages are in that order.');
     }catch(x){ocrs(x.message,2)}
   };
+  $('#file').onchange=e=>{openFiles([...e.target.files]);e.target.value=''};
+  ['#drop','#stage'].forEach(sel=>{const z=$(sel);
+    z.addEventListener('dragover',e=>{e.preventDefault();z.classList.add('over')});
+    z.addEventListener('dragleave',()=>z.classList.remove('over'));
+    z.addEventListener('drop',e=>{e.preventDefault();z.classList.remove('over');openFiles([...e.dataTransfer.files])})});
   $('#prev').onclick=()=>{if(pdf&&pageNo>1){pageNo--;rend()}};$('#next').onclick=()=>{if(pdf&&pageNo<pdf.numPages){pageNo++;rend()}};
   $('#rotL').onclick=()=>{rot[pageNo]=((rot[pageNo]||0)+90)%360;delete boxes[pageNo];rend()};
   $('#zfit').onclick=()=>{if(pdf){fitPage().then(()=>{boxes={};rend()})}};
@@ -74,7 +83,7 @@ function bindDrag(ov){
     const b={x:Math.min(x,drag.x),y:Math.min(y,drag.y),w:Math.abs(x-drag.x),h:Math.abs(y-drag.y)};drag=null;sel.remove();
     if(b.w<6||b.h<6)return;if(!active){ocrs('Click a field on the right first.',2);return}
     (boxes[pageNo]=boxes[pageNo]||[]).push({x:b.x/scale,y:b.y/scale,w:b.w/scale,h:b.h/scale});drawBoxes();
-    const isCol=!!active.closest('tbody'),multi=$('#down').checked&&isCol,cw=$('#cv').clientWidth,ch=$('#cv').clientHeight;
+    const isCol=!!active.closest('tbody'),multi=isCol,cw=$('#cv').clientWidth,ch=$('#cv').clientHeight;
     picks[active.dataset.f]={p:pageNo,rot:rot[pageNo]||0,x:b.x/cw,y:b.y/ch,w:b.w/cw,h:b.h/ch,multi};
     await ocr(b,multi)});
 }
@@ -101,8 +110,10 @@ async function ocr(b,multi){
     ocrs('Reading...',1);
     const lines=await readBox(b,multi);
     if(!lines.length)return ocrs('No text found. Try a tighter box or type it.',2);
-    if(multi)fillDown(lines);else put(active,lines.join(' '));
-    ocrs('Read '+(multi?lines.length+' lines':'"'+lines.join(' ')+'"')+'. Check the value and fix it if wrong.');
+    // a box around a whole column (several lines) fills the rows downward from the selected cell; one line fills just that cell
+    const down=multi&&lines.length>1;
+    if(down)fillDown(lines);else put(active,lines.join(' '));
+    ocrs(down?'Filled '+lines.length+' rows down the '+(COLS.find(c=>c[0]===active.dataset.f)||[0,'column'])[1]+' column. Check each value and fix any that are wrong.':'Read "'+lines.join(' ')+'". Check the value and fix it if wrong.');
   }catch(err){ocrs('OCR failed: '+err.message,2)}
 }
 function clean(f,t){if(f==='po')return t.replace(/\s+/g,'').replace(/^T[XK]?[-_ ]?/i,'TX-').replace(/[Oo](?=\d)/g,'0');if(['heat','coil','cc','bol'].includes(f))return t.replace(/\s+/g,'').replace(/^[^A-Za-z0-9.]+|[^A-Za-z0-9]+$/g,'');if(f==='wt')return t.replace(/[^\d.,]/g,'');return t}
@@ -113,7 +124,12 @@ function fillDown(lines){const f=active.dataset.f;let tr=active.closest('tr');li
 function ocrs(t,k){const o=$('#ocr');if(!o)return;o.textContent=t;o.className=k===1?'busy':k===2?'err':''}
 function addRow(v={}){const tr=document.createElement('tr');tr.innerHTML=COLS.map(c=>`<td><input data-f="${c[0]}" placeholder="${c[1]}" aria-label="${c[1]}" value="${esc(v[c[0]]||'')}"></td>`).join('')+'<td><button class="btn sm ghost" tabindex="-1" title="Remove row">&times;</button></td>';
   tr.querySelector('button').onclick=()=>tr.remove();tr.querySelectorAll('input').forEach(i=>i.addEventListener('focus',()=>setActive(i)));$('#rows').appendChild(tr);return tr}
-function setActive(el){if(active)active.classList.remove('active');active=el;if(el){el.classList.add('active');el.focus({preventScroll:true})}}
+function setActive(el){
+  if(active)active.classList.remove('active');active=el;
+  if(el){el.classList.add('active');el.focus({preventScroll:true});
+    // tell the user what a drag will do for a table cell
+    const o=$('#ocr');if(pdf&&el.closest('tbody')&&o&&o.className!=='busy')ocrs('Selected: '+((COLS.find(c=>c[0]===el.dataset.f)||[0,'cell'])[1])+'. Drag a box around the whole column on the PDF to fill rows down, or around one value to fill just this cell.')}
+}
 // create the packet, then upload the PDF so receivers are notified
 async function saveNew(){
   const bol=$('[data-f=bol]').value.trim();

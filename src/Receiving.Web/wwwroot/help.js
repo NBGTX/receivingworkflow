@@ -18,9 +18,9 @@ const HOW={
   'A quick read on the whole flow: packets per week, average time spent in each step, packets stuck for a day or more, and rejects by vendor.',
   'Use <b>Stuck for a day or more</b> as your daily nudge list. Tap a BOL to open it.']],
  'new':['New packet (intake)',[
-  '1. <b>Choose Files</b> and pick the BOL PDF. Pick several files at once to join them into one packet, in the order picked.',
+  '1. <b>Choose PDF files</b> (or drop them on the box) and pick the BOL PDF. Several files are joined into one packet, in the order picked.',
   '2. The page is read automatically. BOL, vendor, ship date, carrier and the item rows fill in. <b>Compare with the PDF</b>: handwriting and poor scans read badly.',
-  '3. To fix a field, click it, then drag a box around the right text on the PDF. The dotted pills are other readings you can tap. <b>Fill down</b> fills a whole column from a box.',
+  '3. To fix a field, click it, then drag a box around the right text on the PDF. The dotted pills are other readings you can tap. To fill a whole column, click the first cell of that column in the table, then drag one box around the whole column on the PDF: it fills the rows downward by itself.',
   '4. <b>Check heats against the MTR pages</b> and the saved layouts help with repeat vendors. A saved layout remembers where this vendor puts things.',
   '5. <b>Save and send to receivers</b>. The receivers are emailed once the PDF is stored.']],
  reviews:['Reviews',[

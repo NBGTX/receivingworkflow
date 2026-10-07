@@ -520,3 +520,9 @@ select{appearance:none;-webkit-appearance:none;background-color:#fff;border:1.5p
 select:focus{outline:3px solid var(--blue);border-color:var(--mg)}
 select[hidden]{display:none}
 td select,.cols select{min-height:44px;width:100%}
+
+/* intake: file chooser */
+.dropzone{display:flex;align-items:center;gap:14px;flex-wrap:wrap;border:2px dashed #b9c8bf;border-radius:12px;background:#f4f8f5;padding:14px 16px;margin:0 0 10px;transition:.15s}
+.dropzone.over,#stage.over{border-color:var(--mg);background:#e4f1e8}
+#stage.over{outline:3px dashed var(--mg);outline-offset:-6px}
+.dropzone .btn{cursor:pointer}
