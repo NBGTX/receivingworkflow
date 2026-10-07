@@ -92,6 +92,7 @@ try {
 
   Write-Host "`nAdmin"
   Check 'backup runs and lists' { $b = Call $adm POST '/api/admin/backups/run' @{}; $b.file -and @((Call $adm GET '/api/admin/backups').files).Count -ge 1 }
+  Check 'admin email can be saved and read back' { $me0 = Call $adm GET '/api/auth/me'; $null = Call $adm POST '/api/admin/admins' @{ account = $me0.id; name = 'Smoke Admin'; email = 'admin@example.com' }; @(Call $adm GET '/api/admin/admins' | Where-Object { $_.account -eq $me0.id -and $_.email -eq 'admin@example.com' }).Count -eq 1 }
   Check 'status page answers' { (Call $adm GET '/api/admin/status').users -ge 3 }
   Check 'audit search answers' { @((Call $adm GET '/api/admin/audit?q=smoke').rows).Count -ge 1 }
   Check 'reject reasons show on the dashboard' { @((Call $adm GET '/api/reports/summary').reasons | Where-Object { $_.reason -eq 'Rust or corrosion' }).Count -eq 1 }
@@ -107,9 +108,14 @@ try {
   $tk = Call $adm POST '/api/admin/scorch/token' @{}; Start-Sleep 10
   Check 'scorch refuses a wrong phrase' { (Status (Call $adm POST '/api/admin/scorch' @{ token = $tk.token; phrase = 'delete everything'; backups = $false })) -eq 400 }
   Check 'packets still there after refusals' { @(Call $adm GET '/api/packets').Count -ge 1 }
+  $dk = Call $adm POST '/api/admin/scorch/token' @{ keepUsers = $true }; Start-Sleep 10
+  Check 'data wipe needs its own phrase' { (Status (Call $adm POST '/api/admin/scorch' @{ token = $dk.token; phrase = 'DELETE EVERYTHING'; backups = $false; keepUsers = $true })) -eq 400 }
+  $dk = Call $adm POST '/api/admin/scorch/token' @{ keepUsers = $true }; Start-Sleep 10
+  $dw = Call $adm POST '/api/admin/scorch' @{ token = $dk.token; phrase = 'DELETE ALL DATA'; backups = $false; keepUsers = $true }
+  Check 'data wipe clears packets but keeps users' { $dw.packets -ge 1 -and @(Call $adm GET '/api/packets' | Where-Object { $_ }).Count -eq 0 -and (Call $adm GET '/api/admin/users').Count -ge 3 }
   $tk = Call $adm POST '/api/admin/scorch/token' @{}; Start-Sleep 10
   $sc = Call $adm POST '/api/admin/scorch' @{ token = $tk.token; phrase = 'DELETE EVERYTHING'; backups = $false }
-  Check 'scorch wipes packets, users and files' { $sc.packets -ge 1 -and @(Call $adm GET '/api/packets' | Where-Object { $_ }).Count -eq 0 -and @(Call $adm GET '/api/admin/users' | Where-Object { $_ }).Count -eq 0 }
+  Check 'scorch wipes packets, users and files' { $sc.users -ge 3 -and @(Call $adm GET '/api/packets' | Where-Object { $_ }).Count -eq 0 -and @(Call $adm GET '/api/admin/users' | Where-Object { $_ }).Count -eq 0 }
   Check 'token cannot be reused' { (Status (Call $adm POST '/api/admin/scorch' @{ token = $tk.token; phrase = 'DELETE EVERYTHING'; backups = $false })) -eq 400 }
   Check 'admin still signed in after scorch' { (Call $adm GET '/api/auth/me').kind -eq 'win' }
 }

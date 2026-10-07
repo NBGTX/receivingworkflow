@@ -89,8 +89,8 @@ async function logout(msg){try{await api('POST','/api/auth/logout')}catch(e){}S.
 async function showLogin(msg){
   if(typeof renderFoot==='function')renderFoot();
   $('#tabs').innerHTML='';$('#tabs2').innerHTML='';$('#who').innerHTML='';closeDrawer&&closeDrawer();
-  $('#app').innerHTML=`<div class="login"><h1>Who is working?</h1><p>${esc(msg||'Tap your card, then enter your PIN.')}</p><div class="ucards" id="ucards"></div>
-   ${howTo('login')}<div class="adminlink"><button class="btn" id="winbtn">${ic('stamp')} Admin sign-in (Windows)</button><p class="hint" id="winerr" style="margin-top:10px"></p></div></div>`;
+  $('#app').innerHTML=`<div class="login"><h1>Who is working?</h1><p>${esc(msg||'Tap your card, then enter your PIN.')}</p>${howTo('login')}<div class="ucards" id="ucards"></div>
+   <div class="adminlink"><button class="btn" id="winbtn">${ic('stamp')} Admin sign-in (Windows)</button><p class="hint" id="winerr" style="margin-top:10px"></p></div></div>`;
   $('#winbtn').onclick=winLogin;
   try{
     const cards=await api('GET','/api/auth/cards');

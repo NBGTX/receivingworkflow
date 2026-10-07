@@ -57,11 +57,20 @@ function userModal(u){
 /* admins */
 async function tabAdmins(){
   const list=await api('GET','/api/admin/admins');
-  $('#sbody').innerHTML=`<div class="card"><h2>Windows admins</h2><p class="hint" style="margin:0 0 10px">These Windows accounts can open Settings. Use the form DOMAIN\\username, like BG\\sims.anderson. They sign in with the Admin (Windows) button.</p>
-  <table class="list"><thead><tr><th>Account</th><th>Name</th><th></th></tr></thead><tbody>${list.map(a=>`<tr><td class="b">${esc(a.account)}</td><td>${esc(a.name)}</td><td style="text-align:right"><button class="btn sm" data-del="${esc(a.account)}">Remove</button></td></tr>`).join('')}</tbody></table>
-  <div class="frm" style="margin-top:16px">${fld('Windows account',inp('aa','','placeholder="BG\\\\first.last"'))}${fld('Display name',inp('an',''))}</div><p class="err" id="aerr"></p><div class="bar"><button class="btn pri" id="aadd">Add admin</button></div></div>`;
-  $('#aadd').onclick=async()=>{try{await api('POST','/api/admin/admins',{account:$('#aa').value,name:$('#an').value});tabAdmins();toast('Admin added')}catch(e){$('#aerr').textContent=e.message}};
+  $('#sbody').innerHTML=`<div class="card"><h2>Windows admins</h2><p class="hint" style="margin:0 0 10px">These Windows accounts can open Settings. Use the form DOMAIN\\username, like BG\\sims.anderson. They sign in with the Admin (Windows) button. An email address lets an admin receive the alert emails.</p>
+  <table class="list"><thead><tr><th>Account</th><th>Name</th><th>Email</th><th></th></tr></thead><tbody>${list.map(a=>`<tr><td class="b">${esc(a.account)}</td><td>${esc(a.name)}</td><td>${a.email?esc(a.email):'<span class="muted">none</span>'}</td><td style="text-align:right;white-space:nowrap"><button class="btn sm" data-edit="${esc(a.account)}">Edit</button> <button class="btn sm" data-del="${esc(a.account)}">Remove</button></td></tr>`).join('')}</tbody></table>
+  <div class="frm" style="margin-top:16px">${fld('Windows account',inp('aa','','placeholder="BG\\first.last"'))}${fld('Display name',inp('an',''))}${fld('Email (for alerts)',inp('ae','','type="email"'),'span2')}</div><p class="err" id="aerr"></p><div class="bar"><button class="btn pri" id="aadd">Add admin</button></div></div>`;
+  $('#aadd').onclick=async()=>{try{await api('POST','/api/admin/admins',{account:$('#aa').value,name:$('#an').value,email:$('#ae').value});tabAdmins();toast('Admin added')}catch(e){$('#aerr').textContent=e.message}};
   $$('[data-del]').forEach(b=>b.onclick=async()=>{if(!confirm('Remove '+b.dataset.del+' as admin?'))return;try{await api('DELETE','/api/admin/admins?account='+encodeURIComponent(b.dataset.del));tabAdmins()}catch(e){toast(e.message,1)}});
+  $$('[data-edit]').forEach(b=>b.onclick=()=>adminModal(list.find(a=>a.account===b.dataset.edit)));
+}
+// change an admin's display name and email (the account itself cannot change; remove and add instead)
+function adminModal(a){
+  const w=document.createElement('div');w.className='modal';
+  w.innerHTML=`<div class="card"><h2>Edit admin</h2><div class="frm">${fld('Windows account',`<input value="${esc(a.account)}" readonly>`,'span2')}${fld('Display name',inp('en',a.name))}${fld('Email (for alerts)',inp('ee',a.email,'type="email"'))}</div>
+   <p class="err" id="eerr"></p><div class="bar"><button class="btn pri" id="esave">Save</button><button class="btn" id="ecancel">Cancel</button></div></div>`;
+  document.body.appendChild(w);$('#ecancel').onclick=()=>w.remove();
+  $('#esave').onclick=async()=>{try{await api('POST','/api/admin/admins',{account:a.account,name:$('#en').value,email:$('#ee').value});w.remove();tabAdmins();toast('Admin saved')}catch(e){$('#eerr').textContent=e.message}};
 }
 
 /* email */
@@ -129,7 +138,8 @@ function tabGeneral(){
    <p class="hint" style="margin:10px 0 0"><b>Clear demo data</b> removes only the sample packets and demo users. <b>Delete ALL packets</b> removes every packet, including ones you made, and cannot be undone. Users and settings are kept.</p><p id="seedmsg" class="muted" style="margin:8px 0 0"></p></div>
    <div class="card" style="margin-top:16px;border:2px solid #a32428"><h2 style="color:#a32428">Scorched earth</h2>
    <p class="hint" style="margin:0 0 12px">Wipes the whole system back to empty: every packet, every PIN user, all history, every stored PDF, final packet and photo. Admins and the settings on these tabs are kept. There is no undo.</p>
-   <div class="bar" style="margin:0"><button class="btn danger" id="scorch">Scorched earth...</button></div></div>${saveBar()}`;
+   <div class="bar" style="margin:0"><button class="btn danger" id="scorch">Scorched earth...</button><button class="btn danger" id="scorchdata">Delete all data, keep users...</button></div>
+   <p class="hint" style="margin:10px 0 0"><b>Delete all data, keep users</b> clears every packet, all history, files, photos, mail list and saved layouts, but keeps the PIN users and admins, so people can sign in again straight away.</p></div>${saveBar()}`;
   const demoCall=async(path,label,confirmText)=>{
     if(confirmText&&!confirm(confirmText))return;
     const m=$('#seedmsg');m.className='muted';m.textContent=label+'...';
@@ -138,7 +148,8 @@ function tabGeneral(){
     catch(e){m.className='err';m.textContent=e.message}};
   $('#clrdemo').onclick=()=>demoCall('clear-demo','Clearing','Remove the sample packets and demo users?');
   $('#clrall').onclick=()=>demoCall('clear-packets','Deleting','Delete ALL packets, including ones you created? This cannot be undone.');
-  $('#scorch').onclick=()=>scorchFlow();
+  $('#scorch').onclick=()=>scorchFlow(false);
+  $('#scorchdata').onclick=()=>scorchFlow(true);
   $('#seed').onclick=async()=>{const m=$('#seedmsg');m.className='muted';m.textContent='Loading...';try{const r=await api('POST','/api/admin/seed-demo',{});m.textContent='Loaded. PINs: '+r.users;SUsers=await api('GET','/api/admin/users')}catch(e){m.className='err';m.textContent=e.message}};
   [['gn','siteName'],['gb','baseUrl'],['gr','reviewRule']].forEach(([i,k])=>bind(i,g,k));[['gi','idleMinutes'],['gp','pinLength'],['gm','maxFailed'],['gl','lockMinutes']].forEach(([i,k])=>bind(i,g,k,true));
   const here=location.origin,gh=$('#gbh');
@@ -259,15 +270,15 @@ async function tabIntegrations(){
 
 
 /* scorched earth: three screens, a typed phrase and a countdown; the server checks all of it again */
-function scorchFlow(){
+function scorchFlow(keep){
   const w=document.createElement('div');w.className='pinwrap';document.body.appendChild(w);
   const close=()=>w.remove();
   const box=h=>{w.innerHTML=`<div class="pinbox" style="width:min(560px,96vw);text-align:left;max-height:92vh;overflow:auto">${h}</div>`};
   const step1=()=>{
-    box(`<h2 style="color:#a32428;margin:0 0 8px">Scorched earth</h2>
+    box(`<h2 style="color:#a32428;margin:0 0 8px">${keep?'Delete all data':'Scorched earth'}</h2>
     <p style="margin:0 0 10px"><b>This permanently deletes:</b></p>
-    <ul style="margin:0 0 12px;padding-left:20px;line-height:1.6"><li>every packet, inspection, review and approval</li><li>every PIN user (receivers, coordinators, reviewers)</li><li>all activity history and the sent mail list</li><li>every stored PDF, final packet and photo</li><li>saved layouts and the imported PO list</li></ul>
-    <p style="margin:0 0 12px"><b>Kept:</b> the admin list and the settings (email server, folders, notifications). Files already copied to the DocuWare folder are not touched. One line recording that this happened is kept in the history.</p>
+    <ul style="margin:0 0 12px;padding-left:20px;line-height:1.6"><li>every packet, inspection, review and approval</li>${keep?'':'<li>every PIN user (receivers, coordinators, reviewers)</li>'}<li>all activity history and the sent mail list</li><li>every stored PDF, final packet and photo</li><li>saved layouts and the imported PO list</li></ul>
+    <p style="margin:0 0 12px"><b>Kept:</b> ${keep?'the PIN users, ':''}the admin list and the settings (email server, folders, notifications). Files already copied to the DocuWare folder are not touched. One line recording that this happened is kept in the history.</p>
     <label class="ck" style="display:flex;gap:10px;align-items:center;margin:0 0 10px"><input type="checkbox" id="sc_bk"> Also delete the backup files (zips). This removes your safety net.</label>
     <label class="ck" style="display:flex;gap:10px;align-items:flex-start;margin:0 0 16px"><input type="checkbox" id="sc_ok" style="margin-top:4px"> <span>I understand that everything listed above will be gone for good and that there is no undo.</span></label>
     <div class="bar" style="margin:0;justify-content:flex-end"><button class="btn" id="sc_x">Cancel</button><button class="btn danger" id="sc_n" disabled>Continue</button></div>`);
@@ -277,7 +288,7 @@ function scorchFlow(){
   };
   const step2=async bk=>{
     let tk;
-    try{tk=await api('POST','/api/admin/scorch/token',{})}catch(e){toast(e.message,1);return close()}
+    try{tk=await api('POST','/api/admin/scorch/token',{keepUsers:!!keep})}catch(e){toast(e.message,1);return close()}
     box(`<h2 style="color:#a32428;margin:0 0 8px">Last check</h2>
     <p style="margin:0 0 12px">Type <b>${esc(tk.phrase)}</b> exactly, then wait for the countdown. ${bk?'<b>Backups will be deleted too.</b>':'Backups are kept.'}</p>
     <input id="sc_t" autocomplete="off" spellcheck="false" placeholder="${esc(tk.phrase)}" style="width:100%;min-height:52px;font-size:18px;padding:0 14px;border:2px solid #a32428;border-radius:8px">
@@ -289,8 +300,8 @@ function scorchFlow(){
     const timer=setInterval(()=>{left--;if(!document.body.contains(w))return clearInterval(timer);if(left<=0)clearInterval(timer);ready()},1000);
     inp.oninput=ready;inp.focus();
     go.onclick=async()=>{go.disabled=true;go.textContent='Deleting...';
-      try{const r=await api('POST','/api/admin/scorch',{token:tk.token,phrase:inp.value,backups:bk});
-        box(`<h2 style="margin:0 0 8px">Done</h2><p style="margin:0 0 12px">Deleted ${r.packets} packets, ${r.users} users, ${r.history} history entries, ${r.files} files${r.backups?' and '+r.backups+' backup files':''}.</p><div class="bar" style="margin:0;justify-content:flex-end"><button class="btn pri" id="sc_d">OK</button></div>`);
+      try{const r=await api('POST','/api/admin/scorch',{token:tk.token,phrase:inp.value,backups:bk,keepUsers:!!keep});
+        box(`<h2 style="margin:0 0 8px">Done</h2><p style="margin:0 0 12px">Deleted ${r.packets} packets, ${keep?'kept all users, ':r.users+' users, '} ${r.history} history entries, ${r.files} files${r.backups?' and '+r.backups+' backup files':''}.</p><div class="bar" style="margin:0;justify-content:flex-end"><button class="btn pri" id="sc_d">OK</button></div>`);
         $('#sc_d',w).onclick=()=>{close();location.reload()};
       }catch(e){$('#sc_m',w).textContent=e.message;go.textContent='Failed'}};
   };
