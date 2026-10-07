@@ -27,7 +27,8 @@ function viewNew(){
     <div class="fh fld sm">
      <div><label>BOL #</label><input data-f="bol"></div><div><label>Vendor</label><input data-f="vendor"></div>
      <div><label>Ship date</label><input data-f="ship"></div><div><label>Carrier</label><input data-f="carrier"></div></div>
-    <div class="tw"><table class="cells"><colgroup><col style="width:12%"><col style="width:11%"><col style="width:14%"><col style="width:11%"><col style="width:27%"><col style="width:10%"><col style="width:10%"><col style="width:5%"></colgroup><thead><tr id="thead">${COLS.map(c=>`<th data-c="${c[0]}">${c[1]}</th>`).join('')}<th></th></tr></thead><tbody id="rows"></tbody></table></div>
+    <div class="tw"><table class="cells"><colgroup><col style="width:12%"><col style="width:11%"><col style="width:14%"><col style="width:11%"><col style="width:27%"><col style="width:10%"><col style="width:10%"><col style="width:5%"></colgroup><thead><tr id="thead">${COLS.map(c=>`<th data-c="${c[0]}">${c[1]} <button type="button" class="fd" data-fd="${c[0]}" tabindex="-1" title="Copy the first row's ${c[1]} down to every empty row">&darr;</button></th>`).join('')}<th></th></tr></thead><tbody id="rows"></tbody></table></div>
+    <p class="hint" style="margin:8px 0 0"><b>Fill down:</b> click a cell, then drag one box around its whole column on the PDF. Or type a value in the first row and press the &darr; in the column heading to copy it to every empty row (Ctrl+D copies from the cell above).</p>
     <div class="vtool" style="margin-top:12px"><button class="btn" id="addRow">${ic('plus')} Add row</button><span style="flex:1"></span><button class="btn pri" id="save">Save and send to receivers</button></div>
     <p class="muted" id="msg" style="margin:6px 0 0;font-size:13px"></p></div>
   </div>`;
@@ -52,6 +53,18 @@ function viewNew(){
     z.addEventListener('dragover',e=>{e.preventDefault();z.classList.add('over')});
     z.addEventListener('dragleave',()=>z.classList.remove('over'));
     z.addEventListener('drop',e=>{e.preventDefault();z.classList.remove('over');openFiles([...e.dataTransfer.files])})});
+  // copy the first row's value down to every empty cell in that column
+  $('#thead').addEventListener('click',e=>{
+    const b=e.target.closest('[data-fd]');if(!b)return;
+    const f=b.dataset.fd,cells=$$('#rows [data-f='+f+']');if(!cells.length)return;
+    const v=cells[0].value;if(!v.trim())return ocrs('Type a value in the first row of that column first.',2);
+    let n=0;cells.slice(1).forEach(c=>{if(!c.value.trim()){c.value=v;n++}});ocrs(n?'Copied to '+n+' empty row'+(n===1?'':'s')+'.':'No empty rows to fill.');
+  });
+  $('#rows').addEventListener('keydown',e=>{
+    if(!(e.ctrlKey||e.metaKey)||e.key.toLowerCase()!=='d')return;
+    const tr=e.target.closest('tr'),prev=tr&&tr.previousElementSibling;if(!prev)return;
+    e.preventDefault();const f=e.target.dataset.f;e.target.value=prev.querySelector('[data-f='+f+']').value;
+  });
   $('#prev').onclick=()=>{if(pdf&&pageNo>1){pageNo--;rend()}};$('#next').onclick=()=>{if(pdf&&pageNo<pdf.numPages){pageNo++;rend()}};
   $('#rotL').onclick=()=>{rot[pageNo]=((rot[pageNo]||0)+90)%360;delete boxes[pageNo];rend()};
   $('#zfit').onclick=()=>{if(pdf){fitPage().then(()=>{boxes={};rend()})}};
@@ -128,7 +141,8 @@ function setActive(el){
   if(active)active.classList.remove('active');active=el;
   if(el){el.classList.add('active');el.focus({preventScroll:true});
     // tell the user what a drag will do for a table cell
-    const o=$('#ocr');if(pdf&&el.closest('tbody')&&o&&o.className!=='busy')ocrs('Selected: '+((COLS.find(c=>c[0]===el.dataset.f)||[0,'cell'])[1])+'. Drag a box around the whole column on the PDF to fill rows down, or around one value to fill just this cell.')}
+    const o=$('#ocr'),nm=((COLS.find(c=>c[0]===el.dataset.f)||[0,'cell'])[1]);
+    if(el.closest('tbody')&&o&&o.className!=='busy')ocrs(pdf?'Selected: '+nm+'. Drag a box around the whole column on the PDF to fill rows down, or around one value to fill just this cell.':'Selected: '+nm+'. Choose a PDF first, then drag a box on it to read the text. You can also type, or use the arrow in the column heading to copy the first row down.')}
 }
 // create the packet, then upload the PDF so receivers are notified
 async function saveNew(){

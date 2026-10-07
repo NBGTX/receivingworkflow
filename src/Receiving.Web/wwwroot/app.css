@@ -526,3 +526,7 @@ td select,.cols select{min-height:44px;width:100%}
 .dropzone.over,#stage.over{border-color:var(--mg);background:#e4f1e8}
 #stage.over{outline:3px dashed var(--mg);outline-offset:-6px}
 .dropzone .btn{cursor:pointer}
+
+/* intake: copy-down arrow in column headings */
+.cells th .fd{border:1px solid #b9c8bf;background:#fff;color:var(--mg);border-radius:4px;font-size:11px;line-height:1;padding:1px 4px;margin-left:2px;cursor:pointer;vertical-align:middle}
+.cells th .fd:hover{background:var(--mg);color:#fff}
