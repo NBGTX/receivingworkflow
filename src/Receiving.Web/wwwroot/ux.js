@@ -109,7 +109,7 @@ function bindNextStep(){
 
 /* ---------- reject reasons ---------- */
 const REASONS=['Rust or corrosion','Dent or damage','Wrong size','Out of tolerance','Coating damage','Cert missing or unreadable','Wrong material','Other'];
-const OKLABEL={surface:'Surface',cert:'Cert.',visual:'Visual Insp.'};
+const OKLABEL={surface:'Surface',visual:'Visual Insp.'};
 
 /* ---------- what the reviewer needs to see before approving ---------- */
 function reviewSummaryHtml(p){

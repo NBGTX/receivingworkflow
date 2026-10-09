@@ -34,7 +34,7 @@ public static class FinalPacket
 
     static string S(JsonNode? n, string k) => n?[k] is JsonValue v && v.TryGetValue<string>(out var s) ? s : (n?[k]?.ToString() ?? "");
     static string When(long ms) => DateTimeOffset.FromUnixTimeMilliseconds(ms).ToLocalTime().ToString("MMM d, yyyy h:mm tt");
-    static string Val(string v) => v switch { "ok" => "OK", "bad" => "REJECT", _ => v };
+    static string Val(string v) => v switch { "ok" => "OK", "bad" => "REJECT", "yes" => "Y", "no" => "N", _ => v };
 
     static List<string> Wrap(XGraphics g, string text, XFont f, double width)
     {

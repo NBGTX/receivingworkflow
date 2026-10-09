@@ -534,3 +534,6 @@ td select,.cols select{min-height:44px;width:100%}
 /* intake: recognised / new format line */
 .fmt{margin:6px 0 8px;font-size:13px;color:var(--mute)}
 .fmt.ok{color:var(--mg)}.fmt.ok b{color:var(--dg)}
+
+.toggle button.on.yes{background:var(--mg);color:#fff}
+.toggle button.on.no{background:#6b7a74;color:#fff}

@@ -140,6 +140,10 @@ function stageAction(p){
 
 /* ---- inspection form (tablet) ---- */
 function cell([k,l,kind],it,ro){
+  if(kind==='yn'){   // Cert.: Yes / No (old forms stored ok/bad; show them as Yes/No)
+    const v=it[k]==='ok'?'yes':it[k]==='bad'?'no':it[k];
+    return `<div class="fld"><label>${l}</label><div class="toggle" data-ok="${k}"><button type="button" class="yes ${v==='yes'?'on':''}" data-v="yes" ${ro}>Yes</button><button type="button" class="no ${v==='no'?'on':''}" data-v="no" ${ro}>No</button></div></div>`;
+  }
   if(kind==='ok')return `<div class="fld"><label>${l}</label><div class="toggle" data-ok="${k}"><button type="button" class="ok ${it[k]==='ok'?'on':''}" ${ro}>OK</button><button type="button" class="bad ${it[k]==='bad'?'on':''}" ${ro}>Reject</button></div><select class="why" data-k="${k}_why" ${it[k]==='bad'?'':'hidden'} ${ro}><option value="">Reason...</option>${REASONS.map(r=>`<option ${it[k+'_why']===r?'selected':''}>${r}</option>`).join('')}</select></div>`;
   return `<div class="fld"><label>${l}</label><input data-k="${k}" ${kind==='text'?'':'inputmode="decimal"'} value="${esc(it[k]||'')}" ${ro}></div>`;
 }
@@ -229,7 +233,7 @@ async function viewForm(id,po,tk){
       else it.src='';
       draw();autosave()}));
     $$('#items [data-rm]').forEach(b=>b.onclick=()=>{collect();f.items.splice(+b.dataset.rm,1);draw();autosave()});
-    $$('#items .toggle').forEach(tg=>$$('button',tg).forEach(b=>b.onclick=()=>{const it=f.items[+tg.closest('.item').dataset.i];const v=b.classList.contains('ok')?'ok':'bad';it[tg.dataset.ok]=it[tg.dataset.ok]===v?'':v;$$('button',tg).forEach(x=>x.classList.remove('on'));if(it[tg.dataset.ok])b.classList.add('on');const why=tg.parentElement.querySelector('.why');if(why){why.hidden=it[tg.dataset.ok]!=='bad';if(why.hidden){why.value='';it[tg.dataset.ok+'_why']=''}}autosave()}));
+    $$('#items .toggle').forEach(tg=>$$('button',tg).forEach(b=>b.onclick=()=>{const it=f.items[+tg.closest('.item').dataset.i];const v=b.dataset.v||(b.classList.contains('ok')?'ok':'bad');it[tg.dataset.ok]=it[tg.dataset.ok]===v?'':v;$$('button',tg).forEach(x=>x.classList.remove('on'));if(it[tg.dataset.ok])b.classList.add('on');const why=tg.parentElement.querySelector('.why');if(why){why.hidden=it[tg.dataset.ok]!=='bad';if(why.hidden){why.value='';it[tg.dataset.ok+'_why']=''}}autosave()}));
   };
   const updateCount=()=>{const k=f.items.filter(it=>it.heat||it.cc||it.desc).length;const c=$('#cnt');if(c)c.textContent=k+' row'+(k===1?'':'s')+' entered \u00b7 PO has '+rs.length+' item'+(rs.length===1?'':'s')};
   draw();updateCount();

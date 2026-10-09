@@ -777,7 +777,7 @@ ad.MapPost("/seed-demo", (ClaimsPrincipal u) =>
     Add("1929915", "Nucor Berkeley", "08/22/26", "FTMG", "Berkeley Multi PO, multi insp packet.pdf", "inspecting", 5, berk,
         new Dictionary<string, object>
         {
-            ["TX-0015373|shape"] = F("Receiver One", "R1", "2026-08-24", It(berk[0], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = "84", visual = "ok", cert = "ok" }, 0), It(berk[1], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = "86", visual = "ok", cert = "ok" }, 1), It(berk[2], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = ".02", visual = "ok", cert = "ok" }, 2), It(berk[3], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = "86", visual = "ok", cert = "ok" }, 3), It(berk[4], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = "85", visual = "ok", cert = "ok" }, 4)),
+            ["TX-0015373|shape"] = F("Receiver One", "R1", "2026-08-24", It(berk[0], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = "84", visual = "ok", cert = "yes" }, 0), It(berk[1], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = "86", visual = "ok", cert = "yes" }, 1), It(berk[2], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = ".02", visual = "ok", cert = "yes" }, 2), It(berk[3], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = "86", visual = "ok", cert = "yes" }, 3), It(berk[4], new { qty = "6", depth = "6 5/8", width = "12 3/8", thick = ".254", sweep = "85", visual = "ok", cert = "yes" }, 4)),
             ["TX-0015478|shape"] = new { submitted = false, date = "2026-08-24", inspector = "R1", by = "Receiver One", items = new object[] { It(berk[5], new { qty = "6", depth = "6 3/8" }, 5) } }
         },
         new[] { L(5, "Demo Coordinator", "Packet indexed, task created for receivers"), L(3, "R1", "Submitted Beam/channel/angle inspection for TX-0015373") }, Array.Empty<object>(), Array.Empty<object>());
@@ -787,7 +787,7 @@ ad.MapPost("/seed-demo", (ClaimsPrincipal u) =>
         new Dictionary<string, object>
         {
             ["TX-0016400|tube"] = new { submitted = true, date = "2026-08-18", inspector = "R1", by = "Receiver One", items = new object[] { It(delta[0], new { qty = "1", wall = ".351", od = "8 x 12" }, 0), It(delta[1], new { qty = "1", wall = ".354", od = "6 x 6" }, 1) } },
-            ["TX-0016400|shape"] = new { submitted = true, date = "2026-08-18", inspector = "R1", by = "Receiver One", items = new object[] { It(delta[2], new { qty = "2", depth = "18", width = "6", thick = ".327", visual = "ok", cert = "ok" }, 2), It(delta[3], new { qty = "1", depth = "8 5/8", width = "2 1/2", thick = ".277", visual = "ok", cert = "ok" }, 3) } }
+            ["TX-0016400|shape"] = new { submitted = true, date = "2026-08-18", inspector = "R1", by = "Receiver One", items = new object[] { It(delta[2], new { qty = "2", depth = "18", width = "6", thick = ".327", visual = "ok", cert = "yes" }, 2), It(delta[3], new { qty = "1", depth = "8 5/8", width = "2 1/2", thick = ".277", visual = "ok", cert = "yes" }, 3) } }
         },
         new[] { L(30, "Demo Coordinator", "Packet indexed, task created for receivers"), L(27, "R1", "Submitted Rod/pipe/tube inspection for TX-0016400"), L(26, "R1", "Submitted Beam/channel/angle inspection for TX-0016400"), L(26, "Receiver One", "Inspection complete") },
         Array.Empty<object>(), new object[] { new { id = rev.ToString(), name = "Demo Reviewer" } });
@@ -804,7 +804,7 @@ ad.MapPost("/seed-demo", (ClaimsPrincipal u) =>
     for (int i = 0; i < 3; i++) steel.Add(Row("TX-0017002", "B3310" + (i + 1), "", "16212" + i, "3/8 x 6 flat bar x 20'", "382", "20' 0\""));
     object Coil(int i) => new { id = "20", od = i == 2 ? "61 3/4" : "62", gauge = ".094", width = "14.0625", color = "Black", comments = i == 1 ? "Light oil film, wiped" : "" };
     object Sheet() => new { qty = "25", len = "120", width = "48", gauge = "16", comments = "" };
-    object Bar(int i) => new { qty = "20", width = "6", thick = ".375", sweep = i == 2 ? ".3125" : ".25", surface = "ok", cert = "ok", comments = "" };
+    object Bar(int i) => new { qty = "20", width = "6", thick = ".375", sweep = i == 2 ? ".3125" : ".25", surface = "ok", cert = "yes", comments = "" };
     Add("7700123", "Demo Steel Supply", "09/28/26", "Demo Freight Lines", "", "filed", 80, steel,
         new Dictionary<string, object>
         {
@@ -819,8 +819,8 @@ ad.MapPost("/seed-demo", (ClaimsPrincipal u) =>
     var pipe = new List<object>();
     for (int i = 0; i < 3; i++) pipe.Add(Row("TX-0017101", "T700" + (i + 1), "", "16220" + i, "Tubing 6 x 6 x 3/8 x 24'", "660", "24' 0\""));
     for (int i = 0; i < 2; i++) pipe.Add(Row("TX-0017101", "W551" + (i + 1), "", "16221" + i, "Beam W10x22 x 40'", "880", "40' 0\""));
-    object Tube(int i) => new { qty = "1", wall = ".351", od = "6 x 6", surface = i == 1 ? "bad" : "ok", sweep = ".125", cert = "ok", comments = i == 1 ? "Scratch near end, vendor notified" : "" };
-    object Beam(int i) => new { qty = "1", depth = "10", width = "5 3/4", visual = "ok", thick = ".240", sweep = ".375", cert = "ok", comments = "" };
+    object Tube(int i) => new { qty = "1", wall = ".351", od = "6 x 6", surface = i == 1 ? "bad" : "ok", sweep = ".125", cert = "yes", comments = i == 1 ? "Scratch near end, vendor notified" : "" };
+    object Beam(int i) => new { qty = "1", depth = "10", width = "5 3/4", visual = "ok", thick = ".240", sweep = ".375", cert = "yes", comments = "" };
     Add("7700456", "Demo Pipe and Tube", "10/01/26", "Demo Freight Lines", "", "authorize", 20, pipe,
         new Dictionary<string, object>
         {

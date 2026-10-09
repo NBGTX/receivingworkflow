@@ -48,7 +48,7 @@ const HOW={
   '<b>Reopen packet</b> (coordinators) puts it back to authorize and discards the stored final packet; a new one is stored when you authorize again.']],
  form:['This inspection',[
   'Pick a packet item in <b>Fill from packet item</b> to fill heat, description and CC #, or type them. <b>Add rows from BOL</b> adds one row for every BOL line not inspected yet.',
-  'Fill the measurements. Tap <b>OK</b> or <b>Reject</b> on Surface, Visual and Cert. A reject sends the team an email when you submit.',
+  'Fill the measurements. Tap <b>OK</b> or <b>Reject</b> on Surface and Visual (a reject sends the team an email when you submit). <b>Cert.</b> is a <b>Yes / No</b> question: is the mill cert with the material.',
   'Use <b>Tolerance tables</b> to check sizes. Yellow boxes warn when a number is out of tolerance; they are advice only and you can still submit.',
   '<b>Scan</b> reads a CC # barcode with the camera. <b>Add photo</b> attaches pictures to a row.',
   '<b>Save draft</b> keeps your work and lets you come back. <b>Discard</b> throws the draft away. A form left blank is not saved. <b>Submit inspection</b> locks it; use <b>Reopen to edit</b> to change it later.',

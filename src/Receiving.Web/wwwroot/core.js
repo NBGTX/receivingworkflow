@@ -25,9 +25,9 @@ const SL=Object.fromEntries(STAGES);
 const TYPES=[
  {k:'coil',n:'Coil',form:'QCF001',tol:'coil',tolRegion:[.63,.98],show:['coil','heat','desc','cc'],meas:[['id','I.D.'],['od','O.D.'],['gauge','Gauge'],['width','Width'],['color','Color','text']],post:[]},
  {k:'sheet',n:'Flat sheet',form:'QCF023',tol:'sheet',tolRegion:[.70,.90],show:['heat','desc','cc'],meas:[['qty','Qty. Rec./BOL'],['len','Length'],['width','Width'],['gauge','Gauge']],post:[]},
- {k:'bar',n:'Flat bar',form:'QCF005',tol:'bar',tolRegion:[.61,.91],show:['heat','desc','cc'],meas:[['qty','Qnty Rec./BOL'],['width','Width'],['thick','Thick'],['sweep','Sweep / Camber'],['surface','Surface','ok']],post:[['cert','Cert.','ok']]},
- {k:'shape',n:'Beam, channel, angle',form:'QCF011',tol:null,show:['heat','desc','cc'],meas:[['qty','Qty. Rec./BOL'],['depth','Depth'],['width','Width'],['visual','Visual Insp.','ok'],['thick','Thickness'],['sweep','Sweep / Camber']],post:[['cert','Cert.','ok']]},
- {k:'tube',n:'Rod, pipe, tube',form:'QCF008',tol:'tube',tolRegion:[.69,.91],show:['heat','desc','cc'],meas:[['qty','Qnty Rec./BOL'],['wall','Wall Thickness'],['od','O.D.'],['surface','Surface','ok'],['sweep','Sweep / Camber']],post:[['cert','Cert.','ok']]}];
+ {k:'bar',n:'Flat bar',form:'QCF005',tol:'bar',tolRegion:[.61,.91],show:['heat','desc','cc'],meas:[['qty','Qnty Rec./BOL'],['width','Width'],['thick','Thick'],['sweep','Sweep / Camber'],['surface','Surface','ok']],post:[['cert','Cert.','yn']]},
+ {k:'shape',n:'Beam, channel, angle',form:'QCF011',tol:null,show:['heat','desc','cc'],meas:[['qty','Qty. Rec./BOL'],['depth','Depth'],['width','Width'],['visual','Visual Insp.','ok'],['thick','Thickness'],['sweep','Sweep / Camber']],post:[['cert','Cert.','yn']]},
+ {k:'tube',n:'Rod, pipe, tube',form:'QCF008',tol:'tube',tolRegion:[.69,.91],show:['heat','desc','cc'],meas:[['qty','Qnty Rec./BOL'],['wall','Wall Thickness'],['od','O.D.'],['surface','Surface','ok'],['sweep','Sweep / Camber']],post:[['cert','Cert.','yn']]}];
 const FL={coil:'Coil #',heat:'Heat #',desc:'Description',cc:'NBS # (CC #)',po:'PO #',wt:'Weight'};
 const ago=ts=>{const m=(Date.now()-ts)/6e4;return m<1?'now':m<60?Math.round(m)+' min':m<1440?Math.round(m/60)+' h':Math.round(m/1440)+' d'};
 const fdate=ts=>new Date(ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
